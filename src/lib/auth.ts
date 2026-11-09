@@ -22,7 +22,7 @@ function secret(): string {
 const key = () => new TextEncoder().encode(secret());
 const hashOtp = (email: string, code: string) => createHmac("sha256", secret()).update(`${email}:${code}`).digest("hex");
 
-export type Role = "master" | "admin" | "sales";
+export type Role = "master" | "admin" | "sales" | "hr";
 export type User = typeof s.users.$inferSelect;
 
 export const normEmail = (e: string) => e.trim().toLowerCase();

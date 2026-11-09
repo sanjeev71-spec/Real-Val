@@ -6,7 +6,7 @@ import { fmtDate, fmtNum } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function Bookings({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
-  const user = await requireUser();
+  const user = await requireUser(["master", "admin", "sales"]);
   const { q = "" } = await searchParams;
   const all = await computedBookings();
   const mine = user.role === "sales" ? all.filter((r) => r.Emp === user.empCode) : all;

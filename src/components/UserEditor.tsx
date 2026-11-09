@@ -34,6 +34,7 @@ function Row({ initial, isMe }: { initial: U; isMe: boolean }) {
         <select className="input" value={u.role} disabled={isMe} onChange={(e) => setU({ ...u, role: e.target.value as Role })}>
           <option value="sales">Sales user</option>
           <option value="admin">Admin</option>
+          <option value="hr">HR</option>
           {isMe && <option value="master">Master</option>}
         </select>
       </td>

@@ -11,10 +11,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const links: [string, string, boolean][] = user
     ? [
         ["/", "Home", true],
-        ["/scd/new", "New SCD", true],
-        ["/submissions", "SCDs & approvals", true],
-        ["/bookings", "Bookings (SCD lookup)", true],
+        ["/scd/new", "New SCD", user.role !== "hr"],
+        ["/submissions", "SCDs & approvals", user.role !== "hr"],
+        ["/bookings", "Bookings (SCD lookup)", user.role !== "hr"],
+        ["/exp", "Exp", user.role === "admin" || user.role === "master"],
+        ["/emp", "Emp", user.role === "hr" || user.role === "master"],
+        ["/changes", "Exp/Emp approvals", user.role !== "sales"],
         ["/bulk", "Bulk upload", user.role === "master"],
+        ["/admin/masters", "Masters", user.role === "master"],
         ["/admin/users", "Users", user.role === "master"],
       ]
     : [];

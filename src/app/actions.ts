@@ -110,3 +110,55 @@ export async function saveUserAction(input: { id?: number; email: string; name: 
   revalidatePath("/admin/users");
   return { ok: true };
 }
+
+// ---- Exp / Emp change requests
+import * as ch from "@/lib/changes";
+
+export async function expRequestAction(action: "create" | "update" | "delete", data: Record<string, unknown>, targetId?: number) {
+  const user = await requireUser(["admin", "master"]);
+  const r = await ch.requestExp(user, action, data, targetId);
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+}
+export async function empRequestAction(action: "create" | "change" | "correct" | "exit", data: Record<string, unknown>) {
+  const user = await requireUser(["hr", "master"]);
+  const r = await ch.requestEmp(user, action, data);
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+}
+export async function decideChangeAction(id: number, approve: boolean, comment: string) {
+  const user = await requireUser(["master"]);
+  const r = await ch.decideChange(user, id, approve, comment);
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+}
+export async function nudgeChangeAction(id: number) {
+  const user = await requireUser();
+  return ch.nudgeChange(user, id);
+}
+export async function withdrawChangeAction(id: number) {
+  const user = await requireUser();
+  const r = await ch.withdrawChange(user, id);
+  revalidatePath("/", "layout");
+  return r;
+}
+
+// ---- Masters (Master only)
+export async function saveModeAction(name: string, active: boolean) {
+  await requireUser(["master"]);
+  const n = name.trim();
+  if (!n) return { ok: false, message: "Enter a mode name" };
+  const db = await getDb();
+  await db.insert(s.modes).values({ name: n, active }).onConflictDoUpdate({ target: s.modes.name, set: { active } });
+  revalidatePath("/admin/masters");
+  return { ok: true };
+}
+export async function saveHeadAction(head: string, type: string) {
+  await requireUser(["master"]);
+  const h = head.trim();
+  if (!h || !type.trim()) return { ok: false, message: "Enter head and type" };
+  const db = await getDb();
+  await db.insert(s.expHeads).values({ head: h, type: type.trim() }).onConflictDoUpdate({ target: s.expHeads.head, set: { type: type.trim() } });
+  revalidatePath("/admin/masters");
+  return { ok: true };
+}

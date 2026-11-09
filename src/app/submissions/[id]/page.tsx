@@ -13,7 +13,7 @@ import { ActionPanel } from "@/components/ActionPanel";
 export const dynamic = "force-dynamic";
 
 export default async function SubmissionPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requireUser();
+  const user = await requireUser(["master", "admin", "sales"]);
   const id = Number((await params).id);
   const db = await getDb();
   const [sub] = await db.select().from(s.submissions).where(eq(s.submissions.id, id));

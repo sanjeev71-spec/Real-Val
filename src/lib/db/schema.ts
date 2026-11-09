@@ -3,7 +3,7 @@ import {
   boolean, date, doublePrecision, index, integer, jsonb, pgEnum, pgTable, serial, text, timestamp, uniqueIndex,
 } from "drizzle-orm/pg-core";
 
-export const roleEnum = pgEnum("role", ["master", "admin", "sales"]);
+export const roleEnum = pgEnum("role", ["master", "admin", "sales", "hr"]);
 export const submissionStatus = pgEnum("submission_status", [
   "pending_admin", // sales user submitted, waiting for an Admin
   "pending_master", // admin approved (or admin submitted), waiting for Master
@@ -44,10 +44,32 @@ export const employees = pgTable("employees", {
   status: text("status"),
   type: text("type"),
   designation: text("designation"),
-  email: text("email"),
+  email: text("email"), // Personal Mail ID
   changeDateFrom: date("change_date_from").notNull(),
-  changeDateTo: date("change_date_to").notNull(),
-});
+  changeDateTo: date("change_date_to"), // null = current period (treated as today)
+  exitDate: date("exit_date"), // DOExit/Change — set on the period that was closed
+  applicable: text("applicable"), // Y/N — seat cost applies
+  gender: text("gender"),
+  doj: date("doj"),
+  company: text("company"),
+  department: text("department"),
+  remarks: text("remarks"),
+  seatChargeStart: date("seat_charge_start"),
+  // personal data — visible to Master and HR only
+  mobile: text("mobile"),
+  dob: date("dob"),
+  salary: text("salary"),
+  minSalary: text("min_salary"),
+  fatherName: text("father_name"),
+  motherName: text("mother_name"),
+  permanentAddress: text("permanent_address"),
+  currentAddress: text("current_address"),
+  pan: text("pan"),
+  aadhaar: text("aadhaar"),
+  bankName: text("bank_name"),
+  bankAccount: text("bank_account"),
+  ifsc: text("ifsc"),
+}, (t) => [index("emp_emp_idx").on(t.emp)]);
 
 export const expEntries = pgTable("exp_entries", {
   id: serial("id").primaryKey(),
@@ -65,7 +87,35 @@ export const expEntries = pgTable("exp_entries", {
   project: text("project"),
   narration: text("narration"),
   remarks: text("remarks"),
-}, (t) => [index("exp_bkg_idx").on(t.bkgId)]);
+  emp: text("emp"), // "Name~Code"; defaults from the booking, can be changed
+  createdBy: integer("created_by"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+}, (t) => [index("exp_bkg_idx").on(t.bkgId), uniqueIndex("exp_docno_idx").on(t.docNo)]);
+
+/** Mode master — the dropdown for Exp Mode. */
+export const modes = pgTable("modes", {
+  name: text("name").primaryKey(),
+  active: boolean("active").notNull().default(true),
+});
+
+/** Admin/HR changes to Exp and Emp that wait for Master approval. */
+export const changeRequests = pgTable("change_requests", {
+  id: serial("id").primaryKey(),
+  entity: text("entity").notNull(), // exp | emp
+  action: text("action").notNull(), // exp: create|update|delete   emp: create|change|correct|exit
+  targetId: integer("target_id"), // exp_entries.id or employees.id
+  data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+  before: jsonb("before").$type<Record<string, unknown> | null>(),
+  status: text("status").notNull(), // pending | approved | rejected | returned
+  requestedBy: integer("requested_by").notNull(),
+  decidedBy: integer("decided_by"),
+  comment: text("comment"),
+  resultRef: text("result_ref"), // e.g. DocNo or Emp code created
+  lastNudgeAt: timestamp("last_nudge_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+}, (t) => [index("cr_status_idx").on(t.status)]);
 
 export const projects = pgTable("projects", {
   name: text("name").primaryKey(),

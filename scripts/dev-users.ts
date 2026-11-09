@@ -8,9 +8,10 @@ async function main() {
   const db = await getDb();
   await db.execute(sql`insert into users (email, name, role, emp_code) values
     ('admin@realv.test', 'Test Admin', 'admin', null),
-    ('sales@realv.test', 'Test Sales', 'sales', 'Jagmeet~100052')
+    ('sales@realv.test', 'Test Sales', 'sales', 'Jagmeet~100052'),
+    ('hr@realv.test', 'Test HR', 'hr', null)
     on conflict (email) do nothing`);
-  console.log("test users ready: admin@realv.test, sales@realv.test");
+  console.log("test users ready: admin@realv.test, sales@realv.test, hr@realv.test");
   process.exit(0);
 }
 main();

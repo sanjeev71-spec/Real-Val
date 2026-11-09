@@ -6,7 +6,7 @@ import { BookingView } from "@/components/BookingView";
 export const dynamic = "force-dynamic";
 
 export default async function BookingPage({ params }: { params: Promise<{ bkgId: string }> }) {
-  const user = await requireUser();
+  const user = await requireUser(["master", "admin", "sales"]);
   const { bkgId } = await params;
   const row = (await computedBookings()).find((r) => String(r.BkgID).toUpperCase() === decodeURIComponent(bkgId).toUpperCase());
   if (!row || (user.role === "sales" && row.Emp !== user.empCode)) notFound();

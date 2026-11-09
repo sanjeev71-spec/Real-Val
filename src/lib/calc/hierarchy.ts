@@ -42,7 +42,7 @@ export class Hierarchy {
   }
 
   /** Row whose period starts last on/before d for this code (Excel: XMATCH(code|d, Key, -1)). 0-based, -1 = none. */
-  private rowFromOnOrBefore(code: string, d: number): number {
+  rowFromOnOrBefore(code: string, d: number): number {
     const list = this.byCode.get(code.toLowerCase());
     if (!list) return -1;
     let best = -1;

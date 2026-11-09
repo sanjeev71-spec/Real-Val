@@ -1,7 +1,8 @@
 // Loads data/excel/*.json (made by scripts/export-excel.ps1) into the database.
-//   npm run import:excel                 -> refresh masters, Emp and Exp; add bookings not yet in the DB
-//   npm run import:excel -- --masters-only  -> refresh masters, Emp and Exp only
-// Masters, Emp and Exp are replaced wholesale (Excel stays their source of truth for now).
+//   npm run import:excel                       -> refresh masters; add bookings not yet in the DB
+//   npm run import:excel -- --replace-emp-exp  -> also replace Emp and Exp from Excel (one-time migration)
+//   npm run import:excel -- --masters-only     -> masters only, no bookings
+// Masters are replaced wholesale. Emp and Exp are mastered in the web app and are only loaded when empty.
 // Existing bookings are never overwritten.
 import "./load-env";
 import { readFileSync, existsSync } from "node:fs";
@@ -25,27 +26,59 @@ const t = (x: string | number | null) => (str(x) === "" ? null : str(x));
 
 async function main() {
   const mastersOnly = process.argv.includes("--masters-only");
+  const replaceEmpExp = process.argv.includes("--replace-emp-exp");
   const db = await getDb();
 
+  // The web app is the master copy of Emp and Exp. They are only loaded from Excel when the tables are
+  // empty, or when --replace-emp-exp is passed (one-time migration).
+  const [{ n: empCount }] = (await db.execute(sql`select count(*)::int as n from employees`).then((r) => ("rows" in r ? r.rows : r))) as { n: number }[];
+  const loadEmpExp = replaceEmpExp || empCount === 0;
+
   await db.transaction(async (tx) => {
+    if (loadEmpExp) {
     await tx.delete(s.employees);
     const emp = load("Emp").filter((r) => str(r.Emp) !== "");
     if (emp.length)
       await tx.insert(s.employees).values(
-        emp.map((r, i) => ({
-          seq: i,
-          emp: str(r.Emp),
-          reportingHead: str(r.ReportingHead),
-          revShare: n(r.RevShare),
-          expShare: n(r.ExpShare),
-          branch: t(r.Branch),
-          status: t(r.Status),
-          type: t(r.Type),
-          designation: t(r.Designation),
-          email: t(r["Personal Mail ID"]),
-          changeDateFrom: d(r.ChangeDateFrom)!,
-          changeDateTo: d(r.ChangeDateTo)!,
-        })),
+        emp.map((r, i) => {
+          const exit = d(r["DOExit/Change"]);
+          return {
+            seq: i,
+            emp: str(r.Emp),
+            reportingHead: str(r.ReportingHead),
+            revShare: n(r.RevShare),
+            expShare: n(r.ExpShare),
+            branch: t(r.Branch),
+            status: t(r.Status),
+            type: t(r.Type),
+            designation: t(r.Designation),
+            email: t(r["Personal Mail ID"]),
+            changeDateFrom: d(r.ChangeDateFrom)!,
+            // Excel filled open periods with a fixed date; here no exit date = current period (runs to today)
+            changeDateTo: exit,
+            exitDate: exit,
+            applicable: t(r.Applicable),
+            gender: t(r.Gender),
+            doj: d(r.DOJ),
+            company: t(r.Company),
+            department: t(r.Department),
+            remarks: t(r.Remarks),
+            seatChargeStart: d(r.SeatChargeStart),
+            mobile: t(r.Mobile),
+            dob: d(r.DOB),
+            salary: t(r.Salary),
+            minSalary: t(r.MinSalary),
+            fatherName: t(r["Father's Name"]),
+            motherName: t(r["Mother's Name"]),
+            permanentAddress: t(r["Permanent Address"]),
+            currentAddress: t(r["Current Address"]),
+            pan: t(r.PAN),
+            aadhaar: t(r.Aadhaar),
+            bankName: t(r["Bank Name"]),
+            bankAccount: t(r["BankA/cNo"]),
+            ifsc: t(r.IFSC),
+          };
+        }),
       );
 
     await tx.delete(s.expEntries);
@@ -58,6 +91,7 @@ async function main() {
           project: t(r.Project), narration: t(r.Narration), remarks: t(r.Remarks),
         })),
       );
+    }
 
     await tx.delete(s.projects);
     const proj = load("Project").filter((r) => str(r.Project) !== "");
@@ -104,7 +138,7 @@ async function main() {
         })),
       );
   });
-  console.log("masters, Emp and Exp refreshed");
+  console.log(loadEmpExp ? "masters, Emp and Exp loaded from Excel" : "masters refreshed (Emp and Exp kept — the web app is their master copy)");
 
   if (!mastersOnly) {
     const bkg = load("Bkg").filter((r) => str(r.BkgID) !== "");

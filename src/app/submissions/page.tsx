@@ -8,7 +8,7 @@ import { StatusPill } from "@/components/StatusPill";
 export const dynamic = "force-dynamic";
 
 export default async function Submissions({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
-  const user = await requireUser();
+  const user = await requireUser(["master", "admin", "sales"]);
   const { status } = await searchParams;
   const db = await getDb();
   const rows = await db

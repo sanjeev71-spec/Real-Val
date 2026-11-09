@@ -1,13 +1,13 @@
 # Exports the RealV workbook tables to data/excel/*.json so `npm run import:excel` can load them.
 # Usage:  powershell -File scripts/export-excel.ps1 -Workbook "C:\path\RealV.xlsb"
-# Employee personal data (PAN, Aadhaar, bank, family, salary) is NOT exported.
+# Includes employee personal data — the output folder data/ is git-ignored.
 param([Parameter(Mandatory = $true)][string]$Workbook)
 
 $root = Split-Path -Parent $PSScriptRoot
 $out = Join-Path $root "data\excel"
 New-Item -ItemType Directory -Force $out | Out-Null
 
-$empKeep = @('Emp','ReportingHead','Director','Status','Branch','Type','RevShare','ExpShare','DOJ','ChangeDateFrom','ChangeDateTo','Designation','Personal Mail ID')
+# All Emp columns are exported (personal data included); data/ never goes into git.
 $tables = [ordered]@{ Bkg='Bkg'; Exp='Exp'; Emp='Emp'; RCRAMaster='Master'; ExpType='Master'; OverrideRules='Master'; Project='Master'; Inventory='Master'; PriceList='Master' }
 
 $xl = New-Object -ComObject Excel.Application
@@ -24,7 +24,7 @@ try {
         $o = [ordered]@{}
         for ($c = 1; $c -le $hdr.Count; $c++) {
           $name = $hdr[$c - 1]
-          if ($t -eq 'Emp' -and $empKeep -notcontains $name) { continue }
+
           $x = $v[$r, $c]; if ($x -is [int]) { $x = [double]$x }
           $o[$name] = $x
         }

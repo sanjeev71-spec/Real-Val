@@ -6,7 +6,7 @@ import { ScdForm } from "@/components/ScdForm";
 export const dynamic = "force-dynamic";
 
 export default async function NewScd() {
-  const user = await requireUser();
+  const user = await requireUser(["master", "admin", "sales"]);
   const masters = await loadMasters();
   const today = new Date().toISOString().slice(0, 10);
   const initial = { ...NEW_BOOKING_DEFAULTS, BkgLoginDate: today, Emp: user.empCode ?? null };
