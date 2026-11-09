@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+.env
+.env.*
+!.env.example
+# Real business data (client and employee PII) never goes into git
+data/
+.pglite/
+*.tsbuildinfo
+next-env.d.ts
+.vercel
