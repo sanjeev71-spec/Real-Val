@@ -29,7 +29,7 @@ export function BookingView({ row: raw, note }: { row: Record<string, unknown>; 
             </div>
           ) : (
             <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
-              {sec.keys.map((k) => <Item key={k} label={k} k={k} row={row} />)}
+              {sec.keys.map((k, i) => (k === "" ? <div key={`gap${i}`} className="hidden lg:block" /> : <Item key={k} label={k} k={k} row={row} />))}
             </dl>
           )}
         </section>

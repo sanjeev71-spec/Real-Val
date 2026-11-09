@@ -147,20 +147,24 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
         {txt("PAN", "PAN no.")}
       </Section>
 
-      <Section title="Project / builder / unit">
+      <section className="card">
+        <h2 className="h2">Project / Unit</h2>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         {sel("Project", "Project", masters.projects.map((p) => p.name), true)}
-        {txt("ProjectLocation", "Project location", { ro: true })}
         {txt("Builder", "Builder", { ro: true })}
-        {txt("BuilderUID", "Builder UID")}
+        {txt("ProjectLocation", "Project location", { ro: true })}
         <Field k="UnitNo" label="Unit no. (available only)" req errors={errors}>
           <select id="UnitNo" className="input" value={String(d.UnitNo ?? "")} onChange={(e) => set("UnitNo", e.target.value || null)} disabled={!filled.Project}>
             <option value="">{filled.Project ? (units.length ? "— select —" : "No units available") : "Pick a project first"}</option>
             {units.map((u) => <option key={u.unitNo} value={u.unitNo}>{u.unitNo}</option>)}
           </select>
         </Field>
+        {txt("BuilderUID", "Builder UID")}
+        <div className="hidden md:block" />
         {num("Area", "Area (sq ft)", true)}
         {txt("PaymentPlan", "Payment plan", { ro: true })}
-      </Section>
+        </div>
+      </section>
 
       {filled.Project && filled.BkgLoginDate && !pl && (
         <div className="card border-amber-300 bg-amber-50 text-sm">No price list covers {String(filled.Project)} on {fmtDate(filled.BkgLoginDate)}. Ask the back office to update the price list.</div>

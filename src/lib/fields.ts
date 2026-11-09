@@ -74,7 +74,8 @@ export const COSTING_COLUMNS: { key: string; label: string }[][] = [
 export const VIEW_SECTIONS: { title: string; keys: string[] }[] = [
   { title: "Booking", keys: ["BkgID","BkgMonth","BkgLoginDate","FormStatus","SourceOfLead","PropertyType","Emp","Director","Branch","BBA Status","RC/RA","CalcBasis","SIFStatus","WorkingRemarks","ExpectedCollectionDate"] },
   { title: "Client", keys: ["Client","CoApplicant","ContactNo","Mobile2","Email","Address","AreaSectorColony","City","State","PIN","Aadhaar","PAN"] },
-  { title: "Project / unit", keys: ["Project","ProjectLocation","Builder","BuilderUID","UnitNo","Area","PaymentPlan"] },
+  // "" = empty cell, so the three-column grid lines up as on the SCD sheet
+  { title: "Project / Unit", keys: ["Project","Builder","ProjectLocation","UnitNo","BuilderUID","","Area","PaymentPlan"] },
   { title: "Costing details", keys: ["costing"] },
   { title: "Broker details", keys: ["BrokerName","BrokerAmt","CreditNoteAmt"] },
   { title: "Slabs & revenue", keys: ["CSlab","CSlabType","CoRev","DSlab","DSlabType","DirectorRevenue","ASlab","ASlabType","AssociateRevenue","SlabRemarks","UnitAdj","RA%","CoRevRA","RAAchievePertenage"] },
