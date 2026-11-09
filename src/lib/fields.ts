@@ -70,15 +70,24 @@ export const COSTING_COLUMNS: { key: string; label: string }[][] = [
   ],
 ];
 
-/** Sections after the costing block. "costing" marks where the three-column costing block goes. */
-export const VIEW_SECTIONS: { title: string; keys: string[] }[] = [
+/** C, D and A slabs side by side, each with its type and revenue. */
+export const SLAB_COLUMNS: { key: string; label: string }[][] = [
+  [{ key: "CSlab", label: "CSlab" }, { key: "CSlabType", label: "CSlabType" }, { key: "CoRev", label: "CoRev" }],
+  [{ key: "DSlab", label: "DSlab" }, { key: "DSlabType", label: "DSlabType" }, { key: "DirectorRevenue", label: "DirectorRevenue" }],
+  [{ key: "ASlab", label: "ASlab" }, { key: "ASlabType", label: "ASlabType" }, { key: "AssociateRevenue", label: "AssociateRevenue" }],
+];
+
+/**
+ * Read-only booking view. A section shows `columns` (vertical groups side by side) first, then `keys` in a grid.
+ * In `keys`, "" is an empty cell so the three-column grid lines up as on the SCD sheet.
+ */
+export const VIEW_SECTIONS: { title: string; keys: string[]; columns?: { key: string; label: string }[][] }[] = [
   { title: "Booking", keys: ["BkgID","BkgMonth","BkgLoginDate","FormStatus","SourceOfLead","PropertyType","Emp","Director","Branch","BBA Status","RC/RA","CalcBasis","SIFStatus","WorkingRemarks","ExpectedCollectionDate"] },
   { title: "Client", keys: ["Client","CoApplicant","ContactNo","Mobile2","Email","Address","AreaSectorColony","City","State","PIN","Aadhaar","PAN"] },
-  // "" = empty cell, so the three-column grid lines up as on the SCD sheet
   { title: "Project / Unit", keys: ["Project","Builder","ProjectLocation","UnitNo","BuilderUID","","Area","PaymentPlan"] },
-  { title: "Costing details", keys: ["costing"] },
+  { title: "Costing details", keys: [], columns: COSTING_COLUMNS },
   { title: "Broker details", keys: ["BrokerName","BrokerAmt","CreditNoteAmt"] },
-  { title: "Slabs & revenue", keys: ["CSlab","CSlabType","CoRev","DSlab","DSlabType","DirectorRevenue","ASlab","ASlabType","AssociateRevenue","SlabRemarks","UnitAdj","RA%","CoRevRA","RAAchievePertenage"] },
+  { title: "Slabs & revenue", columns: SLAB_COLUMNS, keys: ["SlabRemarks","UnitAdj","RA%","CoRevRA","RAAchievePertenage"] },
   { title: "Incentives", keys: ["DirectorSplRevenue","SpinToWin","IncentivePOC","IncentiveRV","IncentiveBuilder"] },
   { title: "Receipts & dues", keys: ["SPD","ChqAmt","TotalRecdAmt","Recd%","Recoverable","FormRevised","RecdFromClient","BuilderDep","CommRecd","RecdNOC","CommBilled","TotRecd","PendDue","FutDue","OverRecd","BillGSTTDS","RecdAgtBill","BillOS"] },
   { title: "Revenue share", keys: ["RS_ChainCodes","RS_Depth",...[0,1,2,3,4].flatMap((k)=>[`L${k}_Emp`,`L${k}_Share%`,`L${k}_Share`,`L${k}_SharexRA`]),"Override_Emp","Override_Share%","Override_Share","Override_SharexRA"] },

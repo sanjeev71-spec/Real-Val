@@ -225,11 +225,26 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
         {num("CreditNoteAmt", "Credit note amount (Rs)")}
       </Section>
 
-      <Section title="Slab & revenue">
-        {num("DSlab", "Slab (price list)", true)}
-        {txt("DSlabType", "Slab type", { ro: true })}
-        {out("Revenue (Director)", calc.DirectorRevenue, true)}
-      </Section>
+      <section className="card">
+        <h2 className="h2">Slabs & revenue</h2>
+        <div className="grid grid-cols-1 gap-x-6 gap-y-3 md:grid-cols-3">
+          <div className="space-y-3">
+            {num("CSlab", backOffice ? "CSlab" : "CSlab (back office)", !backOffice)}
+            {txt("CSlabType", "CSlabType", { ro: !backOffice })}
+            {out("CoRev", calc.CoRev, true)}
+          </div>
+          <div className="space-y-3">
+            {num("DSlab", "DSlab (price list)", true)}
+            {txt("DSlabType", "DSlabType", { ro: true })}
+            {out("DirectorRevenue", calc.DirectorRevenue, true)}
+          </div>
+          <div className="space-y-3">
+            {num("ASlab", backOffice ? "ASlab" : "ASlab (back office)", !backOffice)}
+            {txt("ASlabType", "ASlabType", { ro: !backOffice })}
+            {out("AssociateRevenue", calc.AssociateRevenue, true)}
+          </div>
+        </div>
+      </section>
 
       <Section title="Incentives applicable on this booking (Rs)">
         {num("DirectorSplRevenue", "Director special revenue")}
@@ -244,10 +259,6 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
           {txt("BBA Status", "BBA status")}
           {sel("RC/RA", "RC/RA", masters.rcra.map((r) => r.name))}
           {sel("CalcBasis", "Calc basis", ["TC", "BSP"])}
-          {num("CSlab", "C slab")}
-          {txt("CSlabType", "C slab type")}
-          {num("ASlab", "A slab")}
-          {txt("ASlabType", "A slab type")}
           {num("UnitAdj", "Unit adjustment")}
           {txt("SlabRemarks", "Slab remarks")}
           {txt("SIFStatus", "SIF status")}

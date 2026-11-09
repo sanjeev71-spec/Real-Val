@@ -1,4 +1,4 @@
-import { COSTING_COLUMNS, DISCOUNT_KEYS, VIEW_SECTIONS } from "@/lib/fields";
+import { DISCOUNT_KEYS, VIEW_SECTIONS } from "@/lib/fields";
 import { fmtCell } from "@/lib/format";
 
 function Item({ label, k, row }: { label: string; k: string; row: Record<string, unknown> }) {
@@ -21,14 +21,15 @@ export function BookingView({ row: raw, note }: { row: Record<string, unknown>; 
       {VIEW_SECTIONS.map((sec) => (
         <section key={sec.title} className="card">
           <h2 className="h2">{sec.title}</h2>
-          {sec.keys[0] === "costing" ? (
+          {sec.columns && (
             <div className="grid grid-cols-1 gap-x-6 gap-y-2 md:grid-cols-3">
-              {COSTING_COLUMNS.map((col, i) => (
+              {sec.columns.map((col, i) => (
                 <dl key={i}>{col.map((c) => <Item key={c.key} label={c.label} k={c.key} row={row} />)}</dl>
               ))}
             </div>
-          ) : (
-            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+          )}
+          {sec.keys.length > 0 && (
+            <dl className={`grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 ${sec.columns ? "mt-4" : ""}`}>
               {sec.keys.map((k, i) => (k === "" ? <div key={`gap${i}`} className="hidden lg:block" /> : <Item key={k} label={k} k={k} row={row} />))}
             </dl>
           )}
