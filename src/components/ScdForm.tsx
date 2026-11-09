@@ -166,30 +166,37 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
         <div className="card border-amber-300 bg-amber-50 text-sm">No price list covers {String(filled.Project)} on {fmtDate(filled.BkgLoginDate)}. Ask the back office to update the price list.</div>
       )}
 
-      <Section title="Costing (per sq ft)">
-        {num("BSPPSF", "BSP (price list)", true)}
-        {num("InaugralDiscountPSF", "Inaugural discount")}
-        {num("NPVDiscountPSF", "NPV discount")}
-        {num("SchemeDiscountPSF", "Scheme discount")}
-        {num("PaymentPlanDiscountPSF", "Payment plan discount")}
-        {num("OnFormDiscountPSF", "On-form discount")}
-        {backOffice && num("FormRevisedPSF", "Form revised (back office)")}
-        {backOffice && num("AgreementRevisedPSF", "Agreement revised (back office)")}
-        {out("Net BSP", calc.NetBSPPSF, true)}
-        {num("PLCPSF", "PLC")}
-        {num("IFMSPSF", "IFMS")}
-        {num("PowerBackupPSF", "Power backup")}
-        {num("SinkingFundClubPSF", "Sinking fund / club")}
-        {num("OtherChargesPSF", "Other charges (price list)", true)}
-        {out("Total charges", calc.TotalChargesPSF)}
-        {out("Total cost (PSF)", calc.TotalCostPSF, true)}
-      </Section>
-
-      <Section title="Amounts (Rs)">
-        {out("Total cost amount", calc.TotalCostAmt)}
-        {out("GST @ 12%", calc.GST)}
-        {out("Total cost incl. GST", calc.TCWithGST, true)}
-      </Section>
+      <section className="card">
+        <h2 className="h2">Costing details</h2>
+        <div className="grid grid-cols-1 gap-x-6 gap-y-3 md:grid-cols-3">
+          <div className="space-y-3">
+            {num("BSPPSF", "BSPPSF (price list)", true)}
+            {out("Total DiscountPSF", totalDiscount(filled))}
+            {out("NetBSPPSF", calc.NetBSPPSF, true)}
+            {out("TotalChargesPSF", calc.TotalChargesPSF)}
+            {out("TotalCostPSF", calc.TotalCostPSF, true)}
+            {out("TotalCostAmt", calc.TotalCostAmt)}
+            {out("GST (12%)", calc.GST)}
+            {out("TCWithGST", calc.TCWithGST, true)}
+          </div>
+          <div className="space-y-3">
+            {num("InaugralDiscountPSF", "InaugralDiscountPSF")}
+            {num("NPVDiscountPSF", "NPVDiscountPSF")}
+            {num("SchemeDiscountPSF", "SchemeDiscountPSF")}
+            {num("FormRevisedPSF", "FormRevisedPSF", !backOffice)}
+            {num("AgreementRevisedPSF", "AgreementRevisedPSF", !backOffice)}
+            {num("PaymentPlanDiscountPSF", "PaymentPlanDiscountPSF")}
+            {num("OnFormDiscountPSF", "OnFormDiscountPSF")}
+          </div>
+          <div className="space-y-3">
+            {num("PLCPSF", "PLC (PSF)")}
+            {num("IFMSPSF", "IFMS (PSF)")}
+            {num("PowerBackupPSF", "Power Backup (PSF)")}
+            {num("SinkingFundClubPSF", "Sinking Fund/Club (PSF)")}
+            {num("OtherChargesPSF", "Other Charges (PSF) (price list)", true)}
+          </div>
+        </div>
+      </section>
 
       {schedule.length > 0 && (
         <section className="card">
@@ -208,7 +215,7 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
         </section>
       )}
 
-      <Section title="Broker / discount">
+      <Section title="Broker details">
         {txt("BrokerName", "Broker name")}
         {num("BrokerAmt", "Broker amount (Rs)")}
         {num("CreditNoteAmt", "Credit note amount (Rs)")}
@@ -257,6 +264,11 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
       </section>
     </div>
   );
+}
+
+const DISCOUNT_KEYS = ["InaugralDiscountPSF", "NPVDiscountPSF", "SchemeDiscountPSF", "FormRevisedPSF", "AgreementRevisedPSF", "PaymentPlanDiscountPSF", "OnFormDiscountPSF"];
+function totalDiscount(d: FormData) {
+  return DISCOUNT_KEYS.reduce((s, k) => s + (typeof d[k] === "number" ? (d[k] as number) : 0), 0);
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

@@ -52,12 +52,31 @@ export const NEW_BOOKING_DEFAULTS: Record<string, string> = {
 export const PERCENT_KEYS = new Set(["Recd%", "RA%", "L0_Share%", "L1_Share%", "L2_Share%", "L3_Share%", "L4_Share%", "Override_Share%"]);
 
 /** Groups for the read-only booking view (SCD Logged). */
+export const DISCOUNT_KEYS = ["InaugralDiscountPSF","NPVDiscountPSF","SchemeDiscountPSF","FormRevisedPSF","AgreementRevisedPSF","PaymentPlanDiscountPSF","OnFormDiscountPSF"];
+
+/** Costing block shown in three columns: totals | discounts | charges (as on the SCD sheet). */
+export const COSTING_COLUMNS: { key: string; label: string }[][] = [
+  [
+    { key: "BSPPSF", label: "BSPPSF" }, { key: "Total DiscountPSF", label: "Total DiscountPSF" },
+    { key: "NetBSPPSF", label: "NetBSPPSF" }, { key: "TotalChargesPSF", label: "TotalChargesPSF" },
+    { key: "TotalCostPSF", label: "TotalCostPSF" }, { key: "TotalCostAmt", label: "TotalCostAmt" },
+    { key: "GST", label: "GST" }, { key: "TCWithGST", label: "TCWithGST" },
+  ],
+  DISCOUNT_KEYS.map((k) => ({ key: k, label: k })),
+  [
+    { key: "PLCPSF", label: "PLC (PSF)" }, { key: "IFMSPSF", label: "IFMS (PSF)" },
+    { key: "PowerBackupPSF", label: "Power Backup (PSF)" }, { key: "SinkingFundClubPSF", label: "Sinking Fund/Club (PSF)" },
+    { key: "OtherChargesPSF", label: "Other Charges (PSF)" },
+  ],
+];
+
+/** Sections after the costing block. "costing" marks where the three-column costing block goes. */
 export const VIEW_SECTIONS: { title: string; keys: string[] }[] = [
   { title: "Booking", keys: ["BkgID","BkgMonth","BkgLoginDate","FormStatus","SourceOfLead","PropertyType","Emp","Director","Branch","BBA Status","RC/RA","CalcBasis","SIFStatus","WorkingRemarks","ExpectedCollectionDate"] },
   { title: "Client", keys: ["Client","CoApplicant","ContactNo","Mobile2","Email","Address","AreaSectorColony","City","State","PIN","Aadhaar","PAN"] },
   { title: "Project / unit", keys: ["Project","ProjectLocation","Builder","BuilderUID","UnitNo","Area","PaymentPlan"] },
-  { title: "Costing (PSF)", keys: ["BSPPSF","InaugralDiscountPSF","NPVDiscountPSF","SchemeDiscountPSF","FormRevisedPSF","AgreementRevisedPSF","PaymentPlanDiscountPSF","OnFormDiscountPSF","NetBSPPSF","PLCPSF","IFMSPSF","PowerBackupPSF","SinkingFundClubPSF","OtherChargesPSF","TotalChargesPSF","TotalCostPSF"] },
-  { title: "Amounts (Rs)", keys: ["TotalCostAmt","GST","TCWithGST","BrokerName","BrokerAmt","CreditNoteAmt"] },
+  { title: "Costing details", keys: ["costing"] },
+  { title: "Broker details", keys: ["BrokerName","BrokerAmt","CreditNoteAmt"] },
   { title: "Slabs & revenue", keys: ["CSlab","CSlabType","CoRev","DSlab","DSlabType","DirectorRevenue","ASlab","ASlabType","AssociateRevenue","SlabRemarks","UnitAdj","RA%","CoRevRA","RAAchievePertenage"] },
   { title: "Incentives", keys: ["DirectorSplRevenue","SpinToWin","IncentivePOC","IncentiveRV","IncentiveBuilder"] },
   { title: "Receipts & dues", keys: ["SPD","ChqAmt","TotalRecdAmt","Recd%","Recoverable","FormRevised","RecdFromClient","BuilderDep","CommRecd","RecdNOC","CommBilled","TotRecd","PendDue","FutDue","OverRecd","BillGSTTDS","RecdAgtBill","BillOS"] },
