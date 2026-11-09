@@ -1,0 +1,8 @@
+# Never upload real data, local databases or secrets with a CLI deploy
+data/
+.pglite/
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
