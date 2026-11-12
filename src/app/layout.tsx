@@ -17,6 +17,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         ["/exp", "Exp", user.role === "admin" || user.role === "master"],
         ["/emp", "Emp", user.role === "hr" || user.role === "master"],
         ["/changes", "Exp/Emp approvals", user.role !== "sales"],
+        ["/reports/demand", "Demand report", user.role !== "hr"],
+        ["/reports/org", "Org chart", user.role !== "sales"],
         ["/bulk", "Bulk upload", user.role === "master"],
         ["/admin/masters", "Masters", user.role === "master"],
         ["/admin/users", "Users", user.role === "master"],

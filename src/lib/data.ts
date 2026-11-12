@@ -229,3 +229,70 @@ export async function expFormData() {
     bookings: bookings.map((b) => ({ id: b.id, client: String(b.data.Client ?? ""), emp: String(b.data.Emp ?? ""), project: String(b.data.Project ?? "") })),
   };
 }
+
+// ---------------------------------------------------------------- Reports
+
+import { computeDemand, type DemandRow } from "./calc/demand";
+
+/** Demand report rows: Live and Not Live bookings, sorted by Builder, Project, Client. */
+export async function demandRows(onlyEmp?: string | null): Promise<DemandRow[]> {
+  const db = await getDb();
+  const [rows, pl] = await Promise.all([computedBookings(), db.select().from(s.priceList)]);
+  const today = todaySerial();
+  const lc = (x: unknown) => String(x ?? "").toLowerCase();
+  return rows
+    .filter((r) => SOLD_STATUSES.includes(String(r.FormStatus ?? "")))
+    .filter((r) => !onlyEmp || r.Emp === onlyEmp)
+    .map((r) => {
+      // 2nd / 3rd demand dates come from the project's price list on the booking date
+      const d = isoToSerial(r.BkgLoginDate as string);
+      const p = pl.find(
+        (x) => lc(x.project) === lc(r.Project) && d !== null && d >= isoToSerial(x.dateFrom)! && (x.dateTo === null || d <= isoToSerial(x.dateTo)!),
+      ) ?? pl.find((x) => lc(x.project) === lc(r.Project));
+      return computeDemand(r, { today, structureDate: serial(p?.structureDate ?? null), possessionDate: serial(p?.possessionDate ?? null) });
+    })
+    .sort((a, b) => a.Builder.localeCompare(b.Builder) || a.Project.localeCompare(b.Project) || a.Client.localeCompare(b.Client));
+}
+
+export interface OrgNode {
+  code: string;
+  name: string; // without the code
+  emp: string; // Name~Code
+  headCode: string; // recorded reporting head
+  active: boolean;
+  revShare: boolean; // carries RevShare (shown as a director box)
+  designation: string | null;
+  branch: string | null;
+  leftOn: string | null;
+}
+
+export const DEFAULT_PARTNERS = ["Pratham Goyal~100031", "Pawan Bedi~200001", "Tarun Kumar~100030", "Aditya Goel~200002"];
+
+export async function partners(): Promise<string[]> {
+  const v = await getSetting("partners");
+  try {
+    return v ? (JSON.parse(v) as string[]) : DEFAULT_PARTNERS;
+  } catch {
+    return DEFAULT_PARTNERS;
+  }
+}
+
+/** One node per employee (their latest period) for the org chart. No personal data. */
+export async function orgNodes(): Promise<OrgNode[]> {
+  const db = await getDb();
+  const rows = currentPeriods(await db.select().from(s.employees));
+  return rows.map((r) => {
+    const [name, code = ""] = r.emp.split("~");
+    return {
+      code,
+      name,
+      emp: r.emp,
+      headCode: r.reportingHead.split("~")[1] ?? "",
+      active: r.changeDateTo === null && r.status !== "Inactive",
+      revShare: (r.revShare ?? 0) !== 0,
+      designation: r.designation,
+      branch: r.branch,
+      leftOn: r.changeDateTo,
+    };
+  });
+}

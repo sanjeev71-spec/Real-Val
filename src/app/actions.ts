@@ -162,3 +162,16 @@ export async function saveHeadAction(head: string, type: string) {
   revalidatePath("/admin/masters");
   return { ok: true };
 }
+
+export async function savePartnersAction(list: string[]) {
+  await requireUser(["master"]);
+  const clean = [...new Set(list.map((x) => x.trim()).filter(Boolean))];
+  const db = await getDb();
+  const names = new Set((await db.selectDistinct({ emp: s.employees.emp }).from(s.employees)).map((e) => e.emp));
+  const bad = clean.filter((x) => !names.has(x));
+  if (bad.length) return { ok: false, message: `Not found in Emp: ${bad.join(", ")}` };
+  const { setSetting } = await import("@/lib/data");
+  await setSetting("partners", JSON.stringify(clean));
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
