@@ -234,7 +234,7 @@ export async function expFormData() {
 
 import { computeDemand, type DemandRow } from "./calc/demand";
 
-/** Demand report rows: Live and Not Live bookings, sorted by Builder, Project, Client. */
+/** Demand report rows: Live and Not Live bookings, sorted by Director, Builder, Project, Client. */
 export async function demandRows(onlyEmp?: string | null): Promise<DemandRow[]> {
   const db = await getDb();
   const [rows, pl] = await Promise.all([computedBookings(), db.select().from(s.priceList)]);
@@ -251,7 +251,10 @@ export async function demandRows(onlyEmp?: string | null): Promise<DemandRow[]> 
       ) ?? pl.find((x) => lc(x.project) === lc(r.Project));
       return computeDemand(r, { today, structureDate: serial(p?.structureDate ?? null), possessionDate: serial(p?.possessionDate ?? null) });
     })
-    .sort((a, b) => a.Builder.localeCompare(b.Builder) || a.Project.localeCompare(b.Project) || a.Client.localeCompare(b.Client));
+    .sort(
+      (a, b) =>
+        a.Director.localeCompare(b.Director) || a.Builder.localeCompare(b.Builder) || a.Project.localeCompare(b.Project) || a.Client.localeCompare(b.Client),
+    );
 }
 
 export interface OrgNode {

@@ -9,10 +9,15 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const user = await currentUser();
   if (!user) return new Response("Sign in first", { status: 401 });
-  const q = (new URL(req.url).searchParams.get("q") ?? "").trim().toLowerCase();
+  // Same partial-text filters as the Bkg page: Director, Builder, Project, Client, BkgID, UnitNo
+  const params = new URL(req.url).searchParams;
+  const terms = ["Director", "Builder", "Project", "Client", "BkgID", "UnitNo"]
+    .map((k) => [k, (params.get(k) ?? "").trim().toLowerCase()] as const)
+    .filter(([, v]) => v);
   let rows = await computedBookings();
   if (user.role === "sales") rows = rows.filter((r) => r.Emp === user.empCode);
-  if (q) rows = rows.filter((r) => ["BkgID", "Client", "ContactNo", "UnitNo", "Project", "Emp"].some((k) => String(r[k] ?? "").toLowerCase().includes(q)));
+  const text = (r: Record<string, unknown>, k: string) => (k === "Director" ? String(r[k] ?? "").split("~")[0] : String(r[k] ?? "")).toLowerCase();
+  if (terms.length) rows = rows.filter((r) => terms.every(([k, v]) => text(r, k).includes(v)));
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Bkg");

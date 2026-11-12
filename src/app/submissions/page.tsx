@@ -23,7 +23,7 @@ export default async function Submissions({ searchParams }: { searchParams: Prom
 
   return (
     <div className="space-y-4">
-      <h1 className="h1">SCDs & approvals</h1>
+      <h1 className="h1">SCD Approval</h1>
       <div className="flex flex-wrap gap-2 text-sm">
         <Link className={`btn ${!status ? "btn-primary" : ""}`} href="/submissions">All</Link>
         {Object.entries(STATUS_LABEL).map(([k, v]) => (

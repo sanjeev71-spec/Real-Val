@@ -9,7 +9,7 @@ export default async function OrgPage() {
   const [nodes, p] = await Promise.all([orgNodes(), partners()]);
   return (
     <div className="space-y-4">
-      <h1 className="h1">Org chart</h1>
+      <h1 className="h1">Org</h1>
       <OrgChart nodes={nodes} partners={p} />
     </div>
   );
