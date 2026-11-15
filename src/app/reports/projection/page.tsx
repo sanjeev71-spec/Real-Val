@@ -5,6 +5,7 @@ import { METRIC_LABEL, MONTHS, projectionGrid, type Metric } from "@/lib/calc/pr
 import { fmtNum } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const METRICS: Metric[] = ["revenue", "bookings", "manMonths"];
 

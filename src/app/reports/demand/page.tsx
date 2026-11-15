@@ -3,6 +3,7 @@ import { demandRows } from "@/lib/data";
 import { DemandReport } from "@/components/DemandReport";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export default async function DemandPage() {
   const user = await requireUser(["master", "admin", "sales"]);

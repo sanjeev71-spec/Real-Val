@@ -7,6 +7,7 @@ import { fmtNum } from "@/lib/format";
 import { COMPANY } from "@/lib/company";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 type View = "tl" | "year" | "director";
 const VIEWS: [View, string][] = [["tl", "TL-wise"], ["year", "Calendar-year"], ["director", "Director-wise"]];

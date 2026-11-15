@@ -4,6 +4,7 @@ import { currentPeriods, employeesWithCalc } from "@/lib/data";
 import { fmtDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export default async function EmpList({ searchParams }: { searchParams: Promise<{ q?: string; all?: string }> }) {
   await requireUser(["hr", "master"]);

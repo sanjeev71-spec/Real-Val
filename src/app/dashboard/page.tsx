@@ -7,6 +7,7 @@ import { isoToSerial, num } from "@/lib/calc/excel";
 import { fmtNum } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const cr = (v: number) => (Math.abs(v) >= 1e7 ? `₹${(v / 1e7).toFixed(2)} cr` : Math.abs(v) >= 1e5 ? `₹${(v / 1e5).toFixed(1)} L` : `₹${fmtNum(Math.round(v))}`);
 

@@ -7,6 +7,7 @@ import { isoToSerial, str } from "./calc/excel";
 import { SOLD_STATUSES } from "./fields";
 import type { MasterData } from "./masters";
 import { COMPANY } from "./company";
+import { memo } from "./cache";
 
 const serial = (d: string | null) => (d === null ? null : isoToSerial(d));
 
@@ -38,7 +39,7 @@ export async function loadEmployees(db: DB): Promise<EmpRow[]> {
 async function loadContext(db: DB) {
   const [employees, expRaw, rc, ov, bk] = await Promise.all([
     loadEmployees(db),
-    db.select().from(s.expEntries),
+    db.select({ bkgId: s.expEntries.bkgId, project: s.expEntries.project, head: s.expEntries.head, mode: s.expEntries.mode, rp: s.expEntries.rp, gross: s.expEntries.gross, gst: s.expEntries.gst, tds: s.expEntries.tds }).from(s.expEntries),
     db.select().from(s.rcRa),
     db.select().from(s.overrideRules),
     db.select({ id: s.bookings.bkgId, project: sql<string>`${s.bookings.data}->>'Project'` }).from(s.bookings),
@@ -60,11 +61,13 @@ async function loadContext(db: DB) {
 }
 
 /** The full Bkg table with every calculated column, in BkgID order. */
-export async function computedBookings(): Promise<BookingRow[]> {
+async function computedBookingsRaw(): Promise<BookingRow[]> {
   const db = await getDb();
   const [rows, ctx] = await Promise.all([db.select().from(s.bookings).orderBy(asc(s.bookings.bkgId)), loadContext(db)]);
   return computeAll(rows.map((r) => ({ ...r.data, BkgID: r.bkgId }) as BookingInput), ctx);
 }
+
+export const computedBookings = (): Promise<BookingRow[]> => memo("computedBookings", computedBookingsRaw);
 
 /** Preview a single booking (e.g. a submission) as it would appear in Bkg. */
 export async function previewBooking(data: Record<string, unknown>): Promise<BookingRow> {
@@ -200,11 +203,13 @@ export const expInputOf = (e: typeof s.expEntries.$inferSelect): ExpInput => ({
 });
 
 /** Every Exp entry with its calculated columns, newest first. */
-export async function expWithCalc(): Promise<(ExpComputedRow & { id: number })[]> {
+async function expWithCalcRaw(): Promise<(ExpComputedRow & { id: number })[]> {
   const db = await getDb();
   const [rows, ctx] = await Promise.all([db.select().from(s.expEntries).orderBy(desc(s.expEntries.id)), expContext()]);
   return rows.map((e) => ({ id: e.id, ...computeExp(expInputOf(e), ctx) }));
 }
+
+export const expWithCalc = (): Promise<(ExpComputedRow & { id: number })[]> => memo("expWithCalc", expWithCalcRaw);
 
 export async function activeModes(): Promise<string[]> {
   const db = await getDb();
@@ -322,20 +327,12 @@ import { SEAT_EXEMPT_DAYS } from "./calc/emp";
 import type { PnlData } from "./calc/pnl";
 import { num as numOf } from "./calc/excel";
 
-let pnlCache: { at: number; data: PnlData } | null = null;
-let coreCache: { at: number; bk: BookingRow[]; exps: Awaited<ReturnType<typeof expWithCalc>> } | null = null;
 
 /** The two heavy reads every report builds on (computed bookings and computed Exp), cached for 30 s. */
-export async function loadCore() {
-  if (coreCache && Date.now() - coreCache.at < 30_000) return coreCache;
-  const [bk, exps] = await Promise.all([computedBookings(), expWithCalc()]);
-  coreCache = { at: Date.now(), bk, exps };
-  return coreCache;
-}
+export const loadCore = () => memo("core", async () => ({ bk: await computedBookings(), exps: await expWithCalc() }));
 
 /** Everything the P&L reports read: computed bookings, computed Exp, and the Emp periods (cached for 30 s - it is a heavy read). */
-export async function loadPnlData(): Promise<PnlData> {
-  if (pnlCache && Date.now() - pnlCache.at < 30_000) return pnlCache.data;
+async function loadPnlDataRaw(): Promise<PnlData> {
   await ensureEmpDerived();
   const db = await getDb();
   const [{ bk, exps }, emp] = await Promise.all([loadCore(), db.select().from(s.employees).orderBy(asc(s.employees.seq))]);
@@ -369,9 +366,9 @@ export async function loadPnlData(): Promise<PnlData> {
     }),
     edges: emp.map((r) => ({ code: r.emp.split("~")[1] ?? "", name: r.emp, headCode: r.reportingHead.split("~")[1] ?? "", revShare: r.revShare ?? 0 })),
   };
-  pnlCache = { at: Date.now(), data };
   return data;
 }
+export const loadPnlData = (): Promise<PnlData> => memo("pnl", loadPnlDataRaw);
 
 /** Directors that appear in Emp (by code, with the latest spelling of the name), sorted by name. */
 export async function pnlDirectors(): Promise<string[]> {
@@ -407,7 +404,7 @@ export const toProjRow = (r: typeof s.projections.$inferSelect): ProjRow => ({
 });
 
 /** Actuals the Projection report compares against: sold bookings by their Emp, and the Emp periods. */
-export async function projectionActuals(): Promise<ProjActuals> {
+async function projectionActualsRaw(): Promise<ProjActuals> {
   await ensureEmpDerived();
   const db = await getDb();
   const [{ bk }, emp] = await Promise.all([loadCore(), db.select().from(s.employees).orderBy(asc(s.employees.seq))]);
@@ -429,3 +426,5 @@ export async function projectionActuals(): Promise<ProjActuals> {
     people: new Map([...people].map(([k, v]) => [k, { name: v.name, director: v.director }])),
   };
 }
+
+export const projectionActuals = (): Promise<ProjActuals> => memo("projActuals", projectionActualsRaw);

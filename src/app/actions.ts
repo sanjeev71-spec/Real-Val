@@ -1,5 +1,12 @@
 "use server";
-import { revalidatePath } from "next/cache";
+import { revalidatePath as revalidate } from "next/cache";
+import { bumpData } from "@/lib/cache";
+
+// every save refreshes the cached calculations as well as the pages
+const revalidatePath: typeof revalidate = (path, type) => {
+  bumpData();
+  revalidate(path, type);
+};
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { normEmail, requestOtp, requireUser, signOut, verifyOtp, type Role } from "@/lib/auth";

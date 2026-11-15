@@ -1,33 +1,76 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #f6f7f9;
+  --bg: #f2f4f8;
   --card: #ffffff;
-  --ink: #18212f;
-  --muted: #64707f;
-  --line: #e2e6ec;
-  --brand: #1f4e79;
+  --ink: #1b2536;
+  --muted: #65748b;
+  --line: #e3e8ef;
+  --brand: #1e3a5f;
   --brand-ink: #ffffff;
+  --accent: #3b82f6;
+  --header: #13263f;
+  --row-alt: #f8fafc;
+  --row-hover: #eef4fb;
+  --radius: 10px;
+}
+/* each company gets its own accent */
+html[data-company="trpl"] {
+  --brand: #0f4c5c;
+  --accent: #14a38b;
+  --header: #0b2f3a;
+  --row-hover: #ecf7f5;
 }
 
+html { -webkit-text-size-adjust: 100%; }
 body {
   background: var(--bg);
   color: var(--ink);
-  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
+a { transition: color .12s; }
 
 @layer components {
-  .card { @apply rounded-lg border border-[var(--line)] bg-[var(--card)] p-4 shadow-sm; }
-  .btn { @apply inline-flex items-center justify-center gap-1 rounded-md border border-[var(--line)] bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50; }
-  .btn-primary { @apply border-transparent bg-[var(--brand)] text-[var(--brand-ink)] hover:bg-[#173b5c]; }
-  .btn-danger { @apply border-red-200 text-red-700 hover:bg-red-50; }
-  .input { @apply w-full rounded-md border border-[var(--line)] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/15 read-only:bg-slate-50 read-only:text-slate-600 disabled:bg-slate-50; }
-  .label { @apply mb-1 block text-xs font-medium text-[var(--muted)]; }
+  .card { @apply rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)] p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_1px_3px_rgba(16,24,40,0.03)]; }
+  .btn { @apply inline-flex h-8 items-center justify-center gap-1 whitespace-nowrap rounded-lg border border-[var(--line)] bg-white px-3 text-[13px] font-medium text-slate-700 shadow-[0_1px_1px_rgba(16,24,40,0.04)] transition hover:border-slate-300 hover:bg-slate-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-primary { @apply border-transparent bg-[var(--brand)] text-[var(--brand-ink)] shadow-sm hover:border-transparent hover:bg-[var(--brand)] hover:brightness-110; }
+  .btn-danger { @apply border-red-200 bg-white text-red-700 hover:border-red-300 hover:bg-red-50; }
+  .input { @apply h-8 w-full rounded-lg border border-[var(--line)] bg-white px-2.5 text-[13px] outline-none transition placeholder:text-slate-400 focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20 read-only:bg-slate-50 read-only:text-slate-600 disabled:bg-slate-50; }
+  textarea.input { @apply h-auto py-1.5; }
+  select.input { @apply pr-6; }
+  .label { @apply mb-1 block text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]; }
   .err { @apply mt-1 text-xs text-red-600; }
-  .h1 { @apply text-xl font-semibold; }
-  .h2 { @apply mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--brand)]; }
-  .table { @apply w-full text-sm; }
-  .table th { @apply border-b border-[var(--line)] px-2 py-1.5 text-left text-xs font-medium text-[var(--muted)]; }
-  .table td { @apply border-b border-[var(--line)] px-2 py-1.5 align-top; }
-  .pill { @apply inline-block rounded-full px-2 py-0.5 text-xs font-medium; }
+  .h1 { @apply text-[22px] font-semibold tracking-tight text-slate-900; }
+  .h2 { @apply mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--brand)]; }
+  .pill { @apply inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold; }
+
+  /* tables: compact, one line per row, scroll sideways instead of growing taller */
+  .table { @apply w-full border-separate border-spacing-0 text-[13px]; }
+  .table th { @apply whitespace-nowrap border-b border-[var(--line)] bg-slate-50 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]; }
+  .table td { @apply whitespace-nowrap border-b border-slate-100 px-3 py-1.5 align-middle; }
+  .table td.wrap, .table th.wrap { white-space: normal; }
+  .table td.text-right, .table th.text-right { font-variant-numeric: tabular-nums; }
+  .table tbody tr:nth-child(even) > td { background-color: var(--row-alt); }
+  .table tbody tr:hover > td { background-color: var(--row-hover); }
+  .tablewrap { @apply max-h-[calc(100vh-17rem)] overflow-auto rounded-[var(--radius)] border border-[var(--line)] bg-white; }
+  .tablewrap .table th { position: sticky; top: 0; z-index: 2; box-shadow: 0 1px 0 var(--line); }
+  .cell-trunc { @apply block max-w-[15rem] truncate; }
+  .link { @apply font-medium text-[var(--brand)] underline decoration-[var(--accent)]/40 underline-offset-2 hover:decoration-[var(--accent)]; }
 }
+
+/* density: compact (default) shows the most rows; comfortable gives air */
+html[data-density="comfortable"] .table td { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+html[data-density="comfortable"] .table { font-size: 14px; }
+html:not([data-density="comfortable"]) .table td { padding-top: 0.28rem; padding-bottom: 0.28rem; }
+
+/* page-load skeleton */
+@keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+.skeleton { background: linear-gradient(90deg, #e9edf3 25%, #f4f6fa 37%, #e9edf3 63%); background-size: 800px 100%; animation: shimmer 1.3s infinite linear; border-radius: 8px; }
+
+/* thin progress bar while a page is loading */
+@keyframes loadbar { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+.loadbar { position: fixed; inset: 0 0 auto 0; height: 3px; z-index: 60; overflow: hidden; background: transparent; }
+.loadbar::before { content: ""; display: block; height: 100%; width: 40%; background: var(--accent); animation: loadbar 1s infinite ease-in-out; }

@@ -1,53 +1,52 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { currentUser } from "@/lib/auth";
 import { signOutAction } from "./actions";
 import { COMPANY } from "../lib/company";
+import { NavBar, type NavGroup, type NavItem } from "@/components/NavBar";
+import { DensityToggle } from "@/components/DensityToggle";
+
+const inter = Inter({ subsets: ["latin"], display: "swap" });
 
 export const metadata: Metadata = { title: `${COMPANY.name} — Bookings`, description: `${COMPANY.form} entry, approvals and Bkg` };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await currentUser();
-  const links: [string, string, boolean][] = user
+  const role = user?.role;
+  const masterOrAdmin = role === "master" || role === "admin";
+  const item = (href: string, label: string, show: boolean): NavItem[] => (show ? [{ href, label }] : []);
+
+  const direct: NavItem[] = user ? [...item("/", "Home", true), ...item("/dashboard", "Dashboard", masterOrAdmin)] : [];
+  const groups: NavGroup[] = user
     ? [
-        ["/", "Home", true],
-        ["/dashboard", "Dashboard", user.role === "master" || user.role === "admin"],
-        ["/scd/new", `New ${COMPANY.form}`, user.role !== "hr"],
-        ["/submissions", `${COMPANY.form} Approval`, user.role !== "hr"],
-        ["/bookings", "Bkg", user.role !== "hr"],
-        ["/exp", "Exp", user.role === "admin" || user.role === "master"],
-        ["/emp", "Emp", user.role === "hr" || user.role === "master"],
-        ["/changes", "Exp/Emp approvals", user.role !== "sales"],
-        ["/reports/demand", "Demand", user.role !== "hr"],
-        ["/reports/pnl", "P&L", user.role === "master"],
-        ["/reports/projection", "Projection", user.role === "master" || user.role === "admin"],
-        ["/reports/org", "Org", user.role !== "sales"],
-        ["/bulk", "Bulk upload", user.role === "master"],
-        ["/admin/masters", "Masters", user.role === "master"],
-        ["/admin/users", "Users", user.role === "master"],
-      ]
+        { label: "Sales", items: [...item("/scd/new", `New ${COMPANY.form}`, role !== "hr"), ...item("/submissions", `${COMPANY.form} Approval`, role !== "hr"), ...item("/bookings", "Bkg", role !== "hr"), ...item("/reports/demand", "Demand", role !== "hr")] },
+        { label: "Accounts", items: [...item("/exp", "Exp", masterOrAdmin), ...item("/changes", "Exp/Emp approvals", role !== "sales"), ...item("/reports/pnl", "P&L", role === "master"), ...item("/reports/projection", "Projection", masterOrAdmin)] },
+        { label: "People", items: [...item("/emp", "Emp", role === "hr" || role === "master"), ...item("/reports/org", "Org chart", role !== "sales")] },
+        { label: "Admin", items: [...item("/bulk", "Bulk upload", role === "master"), ...item("/admin/masters", "Masters", role === "master"), ...item("/admin/projection", "Projection targets", role === "master"), ...item("/admin/users", "Users", role === "master")] },
+      ].filter((g) => g.items.length)
     : [];
   return (
-    <html lang="en">
-      <body className="min-h-screen">
-        <header className="border-b border-[var(--line)] bg-white">
-          <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
-            <Link href="/" className="font-semibold text-[var(--brand)]">{COMPANY.name}</Link>
-            <nav className="flex flex-wrap gap-4 text-sm">
-              {links.filter((l) => l[2]).map(([href, label]) => (
-                <Link key={href} href={href} className="text-slate-700 hover:text-[var(--brand)]">{label}</Link>
-              ))}
-            </nav>
+    <html lang="en" data-company={COMPANY.key} data-density="compact" suppressHydrationWarning>
+      <body className={`${inter.className} min-h-screen`}>
+        <header className="sticky top-0 z-40 bg-[var(--header)] shadow-md">
+          <div className="mx-auto flex max-w-[1760px] flex-wrap items-center gap-x-5 gap-y-1 px-5 py-2.5">
+            <Link href="/" className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-white">
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent)] text-[12px] font-bold text-white">{COMPANY.name.slice(0, 1)}</span>
+              {COMPANY.name}
+            </Link>
+            <NavBar direct={direct} groups={groups} />
             {user && (
-              <form action={signOutAction} className="ml-auto flex items-center gap-3 text-sm">
-                <span className="text-[var(--muted)]">{user.name} · <span className="capitalize">{user.role}</span></span>
-                <button className="btn">Sign out</button>
+              <form action={signOutAction} className="ml-auto flex items-center gap-3 text-[13px]">
+                <DensityToggle />
+                <span className="hidden text-white/70 sm:inline">{user.name} · <span className="capitalize">{user.role}</span></span>
+                <button className="rounded-md border border-white/25 px-3 py-1 text-[13px] font-medium text-white transition hover:bg-white/10">Sign out</button>
               </form>
             )}
           </div>
         </header>
-        <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
+        <main className="mx-auto max-w-[1760px] px-5 py-6">{children}</main>
       </body>
     </html>
   );
