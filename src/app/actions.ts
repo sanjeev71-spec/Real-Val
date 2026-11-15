@@ -242,3 +242,24 @@ export async function applyCleanupAction(id: string, canonical?: string) {
   if (r.ok) revalidatePath("/", "layout");
   return r;
 }
+
+// ---- merge entries into one Exp document / split a line out
+export async function mergePreviewAction(ids: number[]) {
+  await requireUser(["admin", "master"]);
+  const db = await getDb();
+  const p = await ch.previewMerge(db, ids);
+  if (!p.ok) return p;
+  return { ok: true as const, base: p.base, rows: p.plan.map((x) => ({ id: x.id, was: x.was, will: x.will, payDate: x.row.payDate, head: x.row.head, rp: x.row.rp, gross: x.row.gross, narration: x.row.narration })) };
+}
+export async function mergeExpAction(ids: number[]) {
+  const user = await requireUser(["admin", "master"]);
+  const r = await ch.requestMerge(user, ids);
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+}
+export async function splitExpLineAction(lineId: number) {
+  const user = await requireUser(["admin", "master"]);
+  const r = await ch.requestSplit(user, lineId);
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+}

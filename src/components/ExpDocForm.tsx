@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { deleteDraftAction, expDocAction, saveDraftAction } from "@/app/actions";
+import { deleteDraftAction, expDocAction, saveDraftAction, splitExpLineAction } from "@/app/actions";
 import { parsePaste } from "@/lib/pasteLines";
 import { fmtNum } from "@/lib/format";
 import { COMPANY } from "../lib/company";
@@ -101,6 +101,20 @@ export function ExpDocForm(p: ExpDocFormProps) {
       delete c.id; // a copy is a new line
       return [...ls.slice(0, i + 1), c, ...ls.slice(i + 1)];
     });
+  function splitOut(i: number) {
+    const l = lines[i];
+    if (l.id === undefined) return;
+    if (!confirm(`Split line ${i + 1} out into its own document (automatic number)?${isMaster ? "" : " (Master must approve)"}
+
+Unsaved edits on this page are not kept.`)) return;
+    setMsg(null);
+    start(async () => {
+      const r = await splitExpLineAction(l.id!);
+      if (!r.ok) { setMsg({ ok: false, text: r.message ?? "Could not split" }); return; }
+      if (r.applied) router.push("/exp"); else router.push(`/changes/${r.id}`);
+      router.refresh();
+    });
+  }
   const delLine = (i: number) => setLines((ls) => ls.filter((_, j) => j !== i));
 
   const totals = useMemo(() => {
@@ -275,7 +289,7 @@ export function ExpDocForm(p: ExpDocFormProps) {
               <tr>
                 <th className="sticky left-0 z-[3] w-[70px] min-w-[70px] bg-slate-50">#</th>
                 {COLS.map((c) => <th key={c.k} className={c.right ? "text-right" : ""} style={{ minWidth: c.w }}>{c.label}</th>)}
-                <th className="sticky right-0 z-[3] min-w-[130px] bg-slate-50 text-right">Line</th>
+                <th className="sticky right-0 z-[3] min-w-[210px] bg-slate-50 text-right">Line</th>
               </tr>
             </thead>
             <tbody>
@@ -284,6 +298,7 @@ export function ExpDocForm(p: ExpDocFormProps) {
                   <td className="sticky left-0 z-[1] bg-white text-xs text-[var(--muted)]">{i + 1}{l.id === undefined && editing ? <span className="ml-1 text-emerald-600" title="new line">●</span> : null}</td>
                   {COLS.map((c) => <td key={c.k} style={{ minWidth: c.w }} className={err(i, c.k) ? "bg-red-50" : ""}>{cell(i, c)}</td>)}
                   <td className="sticky right-0 z-[1] whitespace-nowrap bg-white text-right">
+                    {editing && l.id !== undefined && lines.length > 1 && <><button type="button" className="btn h-7 px-2" title="Make this line a document of its own" disabled={pending} onClick={() => splitOut(i)}>Split out</button>{" "}</>}
                     <button type="button" className="btn h-7 px-2" title="Duplicate line" onClick={() => dupLine(i)}>⧉ Copy</button>{" "}
                     <button type="button" className="btn btn-danger h-7 px-2" title="Remove line" disabled={lines.length === 1} onClick={() => delLine(i)}>✕</button>
                   </td>

@@ -4,6 +4,7 @@ import { activeModes, expHeadList, expWithCalc } from "@/lib/data";
 import { fmtDate, fmtNum } from "@/lib/format";
 import { EXP_FILTER_KEYS, EXP_TEXT_FILTERS, filterExp } from "@/lib/expFilter";
 import { Pager } from "@/components/Pager";
+import { MergeBar } from "@/components/MergeBar";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -83,11 +84,12 @@ export default async function ExpList({ searchParams }: { searchParams: Promise<
       <div className="tablewrap">
         <table className="table">
           <thead>
-            <tr><th>DocNo</th><th>Pay date</th><th>Head</th><th>Mode</th><th>R/P</th><th className="text-right">Gross</th><th>Chq / UTR</th><th>BkgID</th><th>Client</th><th>Employee</th><th>Director</th><th>Narration</th><th>L0</th><th>L1</th></tr>
+            <tr><th className="w-8"></th><th>DocNo</th><th>Pay date</th><th>Head</th><th>Mode</th><th>R/P</th><th className="text-right">Gross</th><th>Chq / UTR</th><th>BkgID</th><th>Client</th><th>Employee</th><th>Director</th><th>Narration</th><th>L0</th><th>L1</th></tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
+                <td><input type="checkbox" data-merge={r.id} aria-label={`Select ${text(r.DocNo || r.id)}`} /></td>
                 <td><Link className="link" href={`/exp/${r.id}`}>{text(r.DocNo || r.id)}</Link></td>
                 <td>{fmtDate(r.PayDate)}</td>
                 <td>{text(r.Head)}</td>
@@ -104,10 +106,11 @@ export default async function ExpList({ searchParams }: { searchParams: Promise<
                 <td className="text-xs"><span className="cell-trunc">{nameOnly(r.L1_Emp)} {r.L1_Emp ? fmtNum(r.L1_Amt) : ""}</span></td>
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan={14} className="py-6 text-center text-[var(--muted)]">No entries match.</td></tr>}
+            {!rows.length && <tr><td colSpan={15} className="py-6 text-center text-[var(--muted)]">No entries match.</td></tr>}
           </tbody>
         </table>
       </div>
+      <MergeBar />
       <Pager base="/exp" params={params} page={page} pages={pages} total={matched.length} size={size} />
     </div>
   );

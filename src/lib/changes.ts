@@ -24,7 +24,7 @@ const txt = (v: unknown) => (v === null || v === undefined || String(v).trim() =
 
 export const ENTITY_LABEL: Record<string, string> = { exp: "Exp", emp: "Emp" };
 export const ACTION_LABEL: Record<string, string> = {
-  create: "New entry", update: "Edit", delete: "Delete", create_doc: "New document", update_doc: "Edit document", delete_doc: "Delete document", change: "Effective change", correct: "Correct details", exit: "Exit",
+  create: "New entry", update: "Edit", delete: "Delete", create_doc: "New document", update_doc: "Edit document", delete_doc: "Delete document", merge_docs: "Merge entries into one document", split_line: "Split a line into its own document", change: "Effective change", correct: "Correct details", exit: "Exit",
 };
 
 // =================================================================== Exp
@@ -109,6 +109,8 @@ async function nextDocNo(tx: Tx, mode: string | null): Promise<string> {
 }
 
 async function applyExp(tx: Tx, action: string, targetId: number | null, d: ExpData, userId: number): Promise<string> {
+  if (action === "merge_docs") return applyMerge(tx, d as never);
+  if (action === "split_line") return applySplit(tx, d as never);
   if (action.endsWith("_doc")) return applyExpDoc(tx, action, d as unknown as ExpDocData, userId);
   if (action === "create") {
     const docNo = await nextDocNo(tx, d.mode as string | null);
@@ -410,6 +412,83 @@ export async function requestExpDoc(user: User, action: "create_doc" | "update_d
   const n = await normalizeExpDoc(raw, action === "update_doc" ? base ?? null : null);
   if (Object.keys(n.errors).length) return { ok: false, errors: n.errors };
   return submit(user, "exp", action, null, n.data as never, before);
+}
+
+// =================================================================== merge entries into one document / split a line out
+
+export const MERGE_MIN = 2;
+export const MERGE_MAX = 10;
+type ExpRowDb = typeof s.expEntries.$inferSelect;
+const baseOf = (r: ExpRowDb) => r.docBase ?? r.docNo ?? String(r.id);
+
+/** The entry numbered first (lowest id) gives its document number to the merged document. */
+export async function previewMerge(db: DB | Tx, ids: number[]) {
+  const uniq = [...new Set(ids)];
+  if (uniq.length < MERGE_MIN || uniq.length > MERGE_MAX) return { ok: false as const, message: `Select ${MERGE_MIN} to ${MERGE_MAX} entries` };
+  const sel = (await db.select().from(s.expEntries).where(inArray(s.expEntries.id, uniq))).sort((a, b) => a.id - b.id);
+  if (sel.length !== uniq.length) return { ok: false as const, message: "Some selected entries no longer exist - reload the list" };
+  const base = baseOf(sel[0]);
+  const cur = await docLines(db, base);
+  const already = new Set(cur.map((c) => c.id));
+  let next = Math.max(0, ...cur.map((c) => c.lineNo ?? 0), cur.length > 1 || sel[0].lineNo !== null ? 0 : 1) + 1;
+  const plan = sel.map((r) => {
+    if (r.id === sel[0].id) return { id: r.id, was: r.docNo ?? "", will: r.lineNo === null ? lineDocNo(base, 1) : r.docNo ?? "", row: r };
+    if (already.has(r.id)) return { id: r.id, was: r.docNo ?? "", will: r.docNo ?? "", row: r };
+    return { id: r.id, was: r.docNo ?? "", will: lineDocNo(base, next++), row: r };
+  });
+  const fromBases = [...new Set(sel.map(baseOf).filter((b) => b !== base))];
+  const taken = await db.select({ id: s.expEntries.id, docNo: s.expEntries.docNo }).from(s.expEntries).where(inArray(s.expEntries.docNo, plan.map((x) => x.will).filter(Boolean)));
+  const clash = taken.find((t) => !uniq.includes(t.id));
+  if (clash) return { ok: false as const, message: `The number ${clash.docNo} is already used by another entry; open that document first` };
+  return { ok: true as const, base, plan, fromBases };
+}
+
+export async function requestMerge(user: User, ids: number[]): Promise<ChangeResult> {
+  if (user.role !== "admin" && user.role !== "master") return { ok: false, errors: {}, message: "Only Admin or Master can change Exp." };
+  const db = await getDb();
+  const p = await previewMerge(db, ids);
+  if (!p.ok) return { ok: false, errors: {}, message: p.message };
+  const lines = p.plan.map((x) => ({ ...Object.fromEntries(EXP_FIELDS.map((k) => [k, x.row[k] ?? null])), id: x.id, docNo: x.was }));
+  return submit(user, "exp", "merge_docs", null, { docBase: p.base, ids: p.plan.map((x) => x.id), mergedBases: p.fromBases, lines } as never, { docBase: p.base, lines: p.plan.map((x) => ({ id: x.id, docNo: x.was })) });
+}
+
+async function applyMerge(tx: Tx, d: { ids?: number[] }): Promise<string> {
+  const p = await previewMerge(tx, d.ids ?? []);
+  if (!p.ok) throw new Error(p.message);
+  const first = p.plan[0];
+  if (first.will !== first.was) await tx.update(s.expEntries).set({ docBase: p.base, lineNo: 1, docNo: first.will, updatedAt: new Date() }).where(eq(s.expEntries.id, first.id));
+  for (const x of p.plan.slice(1)) {
+    if (x.will === x.was) continue;
+    const n = splitDocNo(x.will).line;
+    await tx.update(s.expEntries).set({ docBase: p.base, lineNo: n, docNo: x.will, updatedAt: new Date() }).where(eq(s.expEntries.id, x.id));
+  }
+  // files attached to a document that no longer has any line follow the merged document
+  for (const b of p.fromBases) {
+    if (!(await docLines(tx, b)).length) await tx.update(s.expAttachments).set({ docBase: p.base }).where(eq(s.expAttachments.docBase, b));
+  }
+  return p.base;
+}
+
+/** Takes one line out of a multi-line document and makes it a document of its own (automatic number). */
+export async function requestSplit(user: User, lineId: number): Promise<ChangeResult> {
+  if (user.role !== "admin" && user.role !== "master") return { ok: false, errors: {}, message: "Only Admin or Master can change Exp." };
+  const db = await getDb();
+  const [line] = await db.select().from(s.expEntries).where(eq(s.expEntries.id, lineId));
+  if (!line) return { ok: false, errors: {}, message: "Entry not found" };
+  const base = baseOf(line);
+  const siblings = await docLines(db, base);
+  if (siblings.length < 2) return { ok: false, errors: {}, message: "This document has only one line" };
+  const row = { ...Object.fromEntries(EXP_FIELDS.map((k) => [k, line[k] ?? null])), id: line.id, docNo: line.docNo };
+  return submit(user, "exp", "split_line", null, { docBase: base, lineId, lines: [row] } as never, { docBase: base, lines: siblings.map((x) => ({ id: x.id, docNo: x.docNo })) });
+}
+
+async function applySplit(tx: Tx, d: { lineId?: number }): Promise<string> {
+  const [line] = await tx.select().from(s.expEntries).where(eq(s.expEntries.id, d.lineId ?? -1));
+  if (!line) throw new Error("The line no longer exists");
+  if ((await docLines(tx, baseOf(line))).length < 2) throw new Error("The document has only one line now");
+  const base = await nextDocBase(tx, line.mode);
+  await tx.update(s.expEntries).set({ docBase: base, lineNo: null, docNo: base, updatedAt: new Date() }).where(eq(s.expEntries.id, line.id));
+  return base;
 }
 
 // =================================================================== shared request / approval

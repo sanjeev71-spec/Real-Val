@@ -21,6 +21,8 @@ const norm = (v: unknown) => (v === null || v === undefined || v === "" ? "" : S
 export function describeChange(action: string, data: Row, before: Row | null): string {
   const lines = (x: Row | null) => (Array.isArray(x?.lines) ? (x!.lines as Row[]) : []);
   if (action === "create_doc") return `Created with ${lines(data).length} line(s)`;
+  if (action === "merge_docs") return `Merged ${lines(data).length} entries into this document (${lines(data).map((l) => l.docNo).join(", ")})`;
+  if (action === "split_line") return `Line ${lines(data)[0]?.docNo ?? ""} split out into its own document`;
   if (action === "delete_doc") return `Deleted (${lines(before).length} line(s))`;
   if (action === "update_doc") {
     const was = new Map(lines(before).map((l) => [l.id as number, l]));
@@ -59,7 +61,7 @@ export async function docHistory(base: string, lineDocNos: string[] = []): Promi
     from change_requests cr
     left join users ru on ru.id = cr.requested_by
     left join users du on du.id = cr.decided_by
-    where cr.entity = 'exp' and (cr.data->>'docBase' = ${base} or cr.before->>'docBase' = ${base} or cr.result_ref = ${base}
+    where cr.entity = 'exp' and (cr.data->>'docBase' = ${base} or cr.before->>'docBase' = ${base} or cr.result_ref = ${base} or cr.data->'mergedBases' @> to_jsonb(${base}::text)
        or cr.data->>'docNo' = any(${sql.raw(`array[${likeLines.map((x) => `'${x.replace(/'/g, "''")}'`).join(",")}]::text[]`)}))
     order by cr.id desc
     limit 100`));
