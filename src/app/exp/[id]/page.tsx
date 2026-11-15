@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { getDb, schema as s } from "@/lib/db";
-import { expContext, expFormData, expInputOf } from "@/lib/data";
+import { bookingsByIds, expContext, expFormData, expInputOf } from "@/lib/data";
 import { computeExp } from "@/lib/calc/exp";
 import { docLines } from "@/lib/changes";
 import { fmtNum } from "@/lib/format";
@@ -19,7 +19,7 @@ export default async function ExpDocument({ params }: { params: Promise<{ id: st
   if (!line) notFound();
   const base = line.docBase ?? line.docNo ?? String(line.id);
   const rows = line.docBase || line.docNo ? await docLines(db, base) : [line];
-  const [f, ctx] = await Promise.all([expFormData(), expContext()]);
+  const [f, ctx, known] = await Promise.all([expFormData(), expContext(), bookingsByIds(rows.map((r) => r.bkgId ?? ""))]);
   const calc = rows.map((e) => computeExp(expInputOf(e), ctx));
   const first = rows[0];
   const lines: DocLine[] = rows.map((e, i) => ({
@@ -32,7 +32,7 @@ export default async function ExpDocument({ params }: { params: Promise<{ id: st
     <div className="space-y-4">
       <h1 className="h1">Exp document {base}</h1>
       <p className="text-sm text-[var(--muted)]">{user.role === "master" ? "Changes are saved immediately." : "Edits and deletions go to the Master for approval."}</p>
-      <ExpDocForm key={base} role={user.role} {...f} docBase={base} initial={{ header, lines }} />
+      <ExpDocForm key={base} role={user.role} {...f} docBase={base} knownBookings={known} initial={{ header, lines }} />
       <section className="card overflow-x-auto">
         <h2 className="h2">Calculated (as saved)</h2>
         <table className="table">

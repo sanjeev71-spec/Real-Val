@@ -232,22 +232,23 @@ async function chqLists() {
   return { purposes, paymentModes, banks };
 }
 
+/** Client / project / employee of some bookings (used to show the lines of an opened Exp document). */
+export async function bookingsByIds(ids: string[]) {
+  const want = [...new Set(ids.map((x) => x.toUpperCase()).filter(Boolean))];
+  if (!want.length) return [];
+  const db = await getDb();
+  const rows = await db.select({ id: s.bookings.bkgId, data: s.bookings.data }).from(s.bookings).where(inArray(sql`upper(${s.bookings.bkgId})`, want));
+  return rows.map((b) => ({ id: b.id, client: String(b.data.Client ?? ""), emp: String(b.data.Emp ?? ""), project: String(b.data.Project ?? "") }));
+}
+
 /** Dropdown data for the Exp form. */
 export async function expFormData() {
   const db = await getDb();
-  const [heads, modes, emp, projects, bookings] = await Promise.all([
-    expHeadList(),
-    activeModes(),
-    db.selectDistinct({ emp: s.employees.emp }).from(s.employees).orderBy(asc(s.employees.emp)),
-    db.select().from(s.projects).orderBy(asc(s.projects.name)),
-    db.select({ id: s.bookings.bkgId, data: s.bookings.data }).from(s.bookings).orderBy(asc(s.bookings.bkgId)),
-  ]);
+  const [heads, modes, projects] = await Promise.all([expHeadList(), activeModes(), db.select().from(s.projects).orderBy(asc(s.projects.name))]);
   return {
     heads: heads.map((h) => ({ head: h.head, type: h.type })),
     modes,
-    employees: emp.map((e) => e.emp),
     projects: projects.map((p) => p.name),
-    bookings: bookings.map((b) => ({ id: b.id, client: String(b.data.Client ?? ""), emp: String(b.data.Emp ?? ""), project: String(b.data.Project ?? "") })),
     chqLists: await chqLists(),
   };
 }

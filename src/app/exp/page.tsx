@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { expWithCalc } from "@/lib/data";
+import { activeModes, expHeadList, expWithCalc } from "@/lib/data";
 import { fmtDate, fmtNum } from "@/lib/format";
+import { EXP_FILTER_KEYS, EXP_TEXT_FILTERS, filterExp } from "@/lib/expFilter";
 import { Pager } from "@/components/Pager";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const SEARCH_KEYS = ["DocNo", "Head", "Mode", "BkgID", "Emp", "Client", "Project", "Director", "Narration", "Chq/UTR No", "Bank Name", "Purpose"];
 const text = (v: unknown) => String(v ?? "");
 const nameOnly = (v: unknown) => text(v).split("~")[0];
 
@@ -15,32 +15,75 @@ export default async function ExpList({ searchParams }: { searchParams: Promise<
   await requireUser(["admin", "master"]);
   const q = await searchParams;
   const size = [50, 100, 250].includes(Number(q.size)) ? Number(q.size) : 100;
-  const all = await expWithCalc();
-  const term = (q.q ?? "").trim().toLowerCase();
-  const matched = term ? all.filter((r) => SEARCH_KEYS.some((k) => text(r[k]).toLowerCase().includes(term))) : all;
+  const [all, heads, modes] = await Promise.all([expWithCalc(), expHeadList(), activeModes()]);
+  const matched = filterExp(all, q);
   const pages = Math.max(1, Math.ceil(matched.length / size));
   const page = Math.min(pages, Math.max(1, Number(q.page) || 1));
   const rows = matched.slice((page - 1) * size, page * size);
-  const params: Record<string, string> = term ? { q: q.q!.trim() } : {};
+  const params: Record<string, string> = {};
+  for (const k of EXP_FILTER_KEYS) if ((q[k] ?? "").trim()) params[k] = q[k]!.trim();
+  const filtered = Object.keys(params).length > 0;
+  const exportHref = `/api/export/exp?${new URLSearchParams(params)}`;
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="h1">Exp</h1>
         <span className="text-sm text-[var(--muted)]">{matched.length.toLocaleString("en-IN")} of {all.length.toLocaleString("en-IN")} lines · newest first</span>
-        <a className="btn ml-auto" href="/api/export/exp">Download Excel</a>
+        <a className="btn ml-auto" href={exportHref}>Download Excel{filtered ? " (this search)" : ""}</a>
         <Link className="btn btn-primary" href="/exp/new">+ New document</Link>
       </div>
-      <form method="get" className="flex max-w-2xl gap-2">
-        <input name="q" defaultValue={q.q ?? ""} className="input" placeholder="Search document, head, BkgID, employee, client, UTR…" />
+
+      <form method="get" className="card space-y-3 py-3">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
+          <div>
+            <label className="label" htmlFor="f-head">Head</label>
+            <select id="f-head" name="head" className="input" defaultValue={q.head ?? ""}>
+              <option value="">All</option>{heads.map((h) => <option key={h.head} value={h.head}>{h.head}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label" htmlFor="f-mode">Mode</label>
+            <select id="f-mode" name="mode" className="input" defaultValue={q.mode ?? ""}>
+              <option value="">All</option>{modes.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label" htmlFor="f-rp">R/P</label>
+            <select id="f-rp" name="rp" className="input" defaultValue={q.rp ?? ""}>
+              <option value="">All</option><option>Receipt</option><option>Payment</option>
+            </select>
+          </div>
+          <div>
+            <label className="label" htmlFor="f-gross">Gross amt</label>
+            <input id="f-gross" name="gross" className="input" placeholder="5000 · >5000 · 1000-5000" defaultValue={q.gross ?? ""} />
+          </div>
+          <div>
+            <label className="label" htmlFor="f-from">Pay date from</label>
+            <input id="f-from" name="from" type="date" className="input" defaultValue={q.from ?? ""} />
+          </div>
+          <div>
+            <label className="label" htmlFor="f-to">Pay date to</label>
+            <input id="f-to" name="to" type="date" className="input" defaultValue={q.to ?? ""} />
+          </div>
+          {EXP_TEXT_FILTERS.map(([k, label]) => (
+            <div key={k}>
+              <label className="label" htmlFor={`f-${k}`}>{label}</label>
+              <input id={`f-${k}`} name={k} className="input" placeholder="contains…" defaultValue={q[k] ?? ""} />
+            </div>
+          ))}
+        </div>
         <input type="hidden" name="size" value={size} />
-        <button className="btn btn-primary">Search</button>
-        {term && <Link className="btn" href="/exp">Clear</Link>}
+        <div className="flex gap-2">
+          <button className="btn btn-primary">Search</button>
+          {filtered && <Link className="btn" href="/exp">Clear</Link>}
+        </div>
       </form>
+
       <div className="tablewrap">
         <table className="table">
           <thead>
-            <tr><th>DocNo</th><th>Pay date</th><th>Head</th><th>Mode</th><th>R/P</th><th className="text-right">Gross</th><th>Chq / UTR</th><th>BkgID</th><th>Employee</th><th>Director</th><th>L0</th><th>L1</th></tr>
+            <tr><th>DocNo</th><th>Pay date</th><th>Head</th><th>Mode</th><th>R/P</th><th className="text-right">Gross</th><th>Chq / UTR</th><th>BkgID</th><th>Client</th><th>Employee</th><th>Director</th><th>Narration</th><th>L0</th><th>L1</th></tr>
           </thead>
           <tbody>
             {rows.map((r) => (
@@ -53,13 +96,15 @@ export default async function ExpList({ searchParams }: { searchParams: Promise<
                 <td className="text-right">{fmtNum(r.Gross)}</td>
                 <td><span className="cell-trunc" title={text(r["Chq/UTR No"])}>{text(r["Chq/UTR No"])}{r["Bank Name"] ? ` · ${text(r["Bank Name"])}` : ""}</span></td>
                 <td>{r.BkgID ? <Link className="link" href={`/bookings/${encodeURIComponent(text(r.BkgID))}`}>{text(r.BkgID)}</Link> : ""}</td>
+                <td><span className="cell-trunc" title={text(r.Client)}>{text(r.Client)}</span></td>
                 <td><span className="cell-trunc" title={text(r.Emp)}>{nameOnly(r.Emp)}</span></td>
                 <td><span className="cell-trunc" title={text(r.Director)}>{nameOnly(r.Director)}</span></td>
+                <td><span className="cell-trunc max-w-[18rem]" title={text(r.Narration)}>{text(r.Narration)}</span></td>
                 <td className="text-xs"><span className="cell-trunc">{nameOnly(r.L0_Emp)} {r.L0_Emp ? fmtNum(r.L0_Amt) : ""}</span></td>
                 <td className="text-xs"><span className="cell-trunc">{nameOnly(r.L1_Emp)} {r.L1_Emp ? fmtNum(r.L1_Amt) : ""}</span></td>
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan={12} className="py-6 text-center text-[var(--muted)]">No entries.</td></tr>}
+            {!rows.length && <tr><td colSpan={14} className="py-6 text-center text-[var(--muted)]">No entries match.</td></tr>}
           </tbody>
         </table>
       </div>

@@ -7,6 +7,7 @@ import { signOutAction } from "./actions";
 import { COMPANY } from "../lib/company";
 import { NavBar, type NavGroup, type NavItem } from "@/components/NavBar";
 import { DensityToggle } from "@/components/DensityToggle";
+import { NavProgress } from "@/components/NavProgress";
 
 const inter = Inter({ subsets: ["latin"], display: "swap" });
 
@@ -30,6 +31,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en" data-company={COMPANY.key} data-density="compact" suppressHydrationWarning>
       <body className={`${inter.className} min-h-screen`}>
+        <NavProgress />
         <header className="sticky top-0 z-40 bg-[var(--header)] shadow-md">
           <div className="mx-auto flex max-w-[1760px] flex-wrap items-center gap-x-5 gap-y-1 px-5 py-2.5">
             <Link href="/" className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-white">

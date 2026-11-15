@@ -1,9 +1,10 @@
 "use client";
-import { Fragment, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { expDocAction } from "@/app/actions";
 import { fmtNum } from "@/lib/format";
 import { COMPANY } from "../lib/company";
+import { Lookup, type BkgHit } from "@/components/Lookup";
 
 type V = string | number | null;
 export type DocLine = Record<string, V> & { id?: number };
@@ -12,17 +13,28 @@ export interface ExpDocFormProps {
   role: string;
   heads: { head: string; type: string | null }[];
   modes: string[];
-  employees: string[];
   projects: string[];
-  bookings: { id: string; client: string; emp: string; project: string }[];
+  knownBookings?: BkgHit[]; // bookings already used by the lines of this document (the rest are searched on demand)
   chqLists?: { purposes: string[]; paymentModes: string[]; banks: string[] };
   docBase?: string | null; // set when editing an existing document
   initial?: { header: Record<string, V>; lines: DocLine[] };
 }
 
 const HEADER_KEYS = ["payDate", "valueDate", "mode", "branch", "narration"] as const;
-const DETAIL_KEYS = ["payDate", "valueDate", "branch", "project", "remarks", "purpose", "paymentMode", "chqBank", "instrNo", "instrDate"];
 const isChq = (l: DocLine) => String(l.mode ?? "").toLowerCase() === "chq";
+
+/** Every field of a line, in one row. width = minimum column width in px. */
+const COLS: { k: string; label: string; w: number; right?: boolean }[] = [
+  { k: "head", label: "Head", w: 170 }, { k: "rp", label: "R/P", w: 110 }, { k: "mode", label: "Mode", w: 130 },
+  { k: "gross", label: "Gross", w: 120, right: true }, { k: "gst", label: "GST", w: 90, right: true }, { k: "tds", label: "TDS", w: 90, right: true },
+  { k: "bkgId", label: "BkgID", w: 120 }, { k: "_who", label: "Client · Project (from booking)", w: 230 },
+  { k: "emp", label: "Employee", w: 230 }, { k: "project", label: "Project (no booking)", w: 170 },
+  { k: "narration", label: "Narration", w: 240 }, { k: "remarks", label: "Remarks", w: 180 },
+  { k: "payDate", label: "Pay date", w: 140 }, { k: "valueDate", label: "Value date", w: 140 }, { k: "branch", label: "Branch", w: 120 },
+  { k: "purpose", label: "Purpose *", w: 150 }, { k: "paymentMode", label: "PaymentMode *", w: 140 }, { k: "chqBank", label: "Bank", w: 160 },
+  { k: "instrNo", label: "Chq / UTR No *", w: 170 }, { k: "instrDate", label: "Chq / UTR Date *", w: 150 },
+];
+const CHQ_KEYS = new Set(["purpose", "paymentMode", "chqBank", "instrNo", "instrDate"]);
 
 export function ExpDocForm(p: ExpDocFormProps) {
   const router = useRouter();
@@ -32,12 +44,27 @@ export function ExpDocForm(p: ExpDocFormProps) {
   const [lines, setLines] = useState<DocLine[]>(
     p.initial?.lines ?? [{ payDate: today, valueDate: today, rp: "Receipt", head: null, mode: null, branch: null, gross: null, gst: null, tds: null, bkgId: null, emp: null, project: null, narration: null, remarks: null }],
   );
-  const [open, setOpen] = useState<Set<number>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
   const isMaster = p.role === "master";
-  const bookingById = useMemo(() => new Map(p.bookings.map((b) => [b.id.toUpperCase(), b])), [p.bookings]);
+  const [bk, setBk] = useState<Map<string, BkgHit>>(() => new Map((p.knownBookings ?? []).map((b) => [b.id.toUpperCase(), b])));
+  const bookingById = bk;
+  const remember = (h: BkgHit) => setBk((m) => new Map(m).set(h.id.toUpperCase(), h));
+  // a BkgID typed by hand: look it up once so the client / project show and Employee can default
+  async function resolveBkg(i: number, id: string) {
+    const key = id.trim().toUpperCase();
+    if (!key) return;
+    let hit = bk.get(key);
+    if (!hit) {
+      try {
+        const r = await fetch(`/api/lookup?type=bkg&id=${encodeURIComponent(key)}`);
+        hit = r.ok ? ((await r.json()) as BkgHit[])[0] : undefined;
+      } catch { hit = undefined; }
+      if (hit) remember(hit);
+    }
+    if (hit && hit.emp) setLines((ls) => ls.map((l, j) => (j === i && !l.emp ? { ...l, emp: hit!.emp } : l)));
+  }
   const typeOf = useMemo(() => new Map(p.heads.map((h) => [h.head, h.type ?? ""])), [p.heads]);
 
   // a header change flows into every line that still carries the old header value
@@ -55,12 +82,7 @@ export function ExpDocForm(p: ExpDocFormProps) {
   const setL = (i: number, k: string, v: V) =>
     setLines((ls) => ls.map((l, j) => {
       if (j !== i) return l;
-      const n = { ...l, [k]: v };
-      if (k === "bkgId") {
-        const b = bookingById.get(String(v ?? "").toUpperCase());
-        if (b && !l.emp) n.emp = b.emp;
-      }
-      return n;
+      return { ...l, [k]: v };
     }));
   const addLine = () =>
     setLines((ls) => {
@@ -74,7 +96,6 @@ export function ExpDocForm(p: ExpDocFormProps) {
       return [...ls.slice(0, i + 1), c, ...ls.slice(i + 1)];
     });
   const delLine = (i: number) => setLines((ls) => ls.filter((_, j) => j !== i));
-  const toggle = (i: number) => setOpen((s) => { const n = new Set(s); if (n.has(i)) n.delete(i); else n.add(i); return n; });
 
   const totals = useMemo(() => {
     let rec = 0, pay = 0;
@@ -92,10 +113,6 @@ export function ExpDocForm(p: ExpDocFormProps) {
       const r = await expDocAction(action, { docNo: header.docNo, lines }, p.docBase);
       if (!r.ok) {
         setErrors(r.errors ?? {});
-        // open the detail row of any line whose error sits in a detail field
-        const o = new Set(open);
-        for (const k of Object.keys(r.errors ?? {})) { const m = /^line\.(\d+)\.(\w+)$/.exec(k); if (m && DETAIL_KEYS.includes(m[2])) o.add(Number(m[1])); }
-        setOpen(o);
         setMsg({ ok: false, text: r.message ?? "Please fix the highlighted fields." });
         return;
       }
@@ -108,10 +125,61 @@ export function ExpDocForm(p: ExpDocFormProps) {
   }
 
   const err = (i: number, k: string) => errors[`line.${i}.${k}`];
-  const cell = (i: number, k: string, extra: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
-    <input className={`input ${err(i, k) ? "border-red-500" : ""}`} value={String(lines[i][k] ?? "")} title={err(i, k) ?? undefined}
+  const labelOf = (k: string) => COLS.find((c) => c.k === k)?.label.replace(" *", "") ?? k;
+  const lineErrors = Object.entries(errors)
+    .filter(([k]) => k.startsWith("line."))
+    .map(([k, v]) => { const m = /^line\.(\d+)\.(\w+)$/.exec(k); return m ? { i: Number(m[1]), k: m[2], v } : null; })
+    .filter((x): x is { i: number; k: string; v: string } => x !== null)
+    .sort((a, b) => a.i - b.i);
+
+  const input = (i: number, k: string, extra: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
+    <input className={`input ${err(i, k) ? "border-red-500 bg-red-50" : ""}`} value={String(lines[i][k] ?? "")} title={err(i, k) ?? undefined}
       onChange={(e) => setL(i, k, e.target.value === "" ? null : e.target.value)} {...extra} />
   );
+
+  function cell(i: number, c: (typeof COLS)[number]) {
+    const l = lines[i];
+    const chqOff = CHQ_KEYS.has(c.k) && !isChq(l);
+    const off = chqOff ? { disabled: true, placeholder: "Chq only" } : {};
+    switch (c.k) {
+      case "head":
+        return (
+          <select className={`input ${err(i, "head") ? "border-red-500 bg-red-50" : ""}`} value={String(l.head ?? "")} title={err(i, "head") ?? (typeOf.get(String(l.head ?? "")) || undefined)} onChange={(e) => setL(i, "head", e.target.value || null)}>
+            <option value="">—</option>{p.heads.map((h) => <option key={h.head} value={h.head}>{h.head}</option>)}
+          </select>
+        );
+      case "rp":
+        return <select className="input" value={String(l.rp ?? "")} onChange={(e) => setL(i, "rp", e.target.value)}><option>Receipt</option><option>Payment</option></select>;
+      case "mode":
+        return (
+          <select className={`input ${err(i, "mode") ? "border-red-500 bg-red-50" : ""}`} value={String(l.mode ?? "")} title={err(i, "mode") ?? undefined} onChange={(e) => setL(i, "mode", e.target.value || null)}>
+            <option value="">—</option>{p.modes.map((m) => <option key={m}>{m}</option>)}
+          </select>
+        );
+      case "gross": case "gst": case "tds":
+        return input(i, c.k, { inputMode: "decimal", className: `input text-right ${err(i, c.k) ? "border-red-500 bg-red-50" : ""}` });
+      case "bkgId":
+        return (
+          <div onBlur={() => resolveBkg(i, String(lines[i].bkgId ?? ""))}>
+            <Lookup kind="bkg" value={String(l.bkgId ?? "")} placeholder={COMPANY.idExample} className={err(i, "bkgId") ? "border-red-500 bg-red-50" : ""} title={err(i, "bkgId") ?? undefined}
+              onChange={(v) => setL(i, "bkgId", v === "" ? null : v)}
+              onPick={(it) => { if (typeof it !== "string") { remember(it); if (!lines[i].emp && it.emp) setL(i, "emp", it.emp); } }} />
+          </div>
+        );
+      case "_who": {
+        const b = bookingById.get(String(l.bkgId ?? "").toUpperCase());
+        return <div className="truncate rounded-lg bg-slate-50 px-2.5 py-1.5 text-[12px] text-slate-600" title={b ? `${b.client} · ${b.project}` : undefined}>{b ? `${b.client} · ${b.project}` : <span className="text-slate-400">—</span>}</div>;
+      }
+      case "emp":
+        return <Lookup kind="emp" value={String(l.emp ?? "")} placeholder="Type to search" className={err(i, "emp") ? "border-red-500 bg-red-50" : ""} title={err(i, "emp") ?? undefined} onChange={(v) => setL(i, "emp", v === "" ? null : v)} />;
+      case "project": return input(i, "project", { list: "project-list", disabled: Boolean(bookingById.get(String(l.bkgId ?? "").toUpperCase())) });
+      case "payDate": case "valueDate": case "instrDate": return input(i, c.k, { type: "date", ...off });
+      case "purpose": return input(i, "purpose", { list: "chq-purposes", ...off });
+      case "paymentMode": return input(i, "paymentMode", { list: "chq-paymodes", ...off });
+      case "chqBank": return input(i, "chqBank", { list: "chq-banks", ...off });
+      default: return input(i, c.k, off);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -123,7 +191,7 @@ export function ExpDocForm(p: ExpDocFormProps) {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-6">
           <div>
             <label className="label" htmlFor="docNo">Document number</label>
-            {editing ? <div className="rounded-md bg-slate-50 px-2.5 py-1.5 text-sm font-medium">{p.docBase}</div> : (
+            {editing ? <div className="flex h-8 items-center rounded-lg bg-slate-50 px-2.5 text-[13px] font-semibold">{p.docBase}</div> : (
               <input id="docNo" className="input" value={String(header.docNo ?? "")} onChange={(e) => setH("docNo", e.target.value)} placeholder="blank = automatic" />
             )}
             {errors.docNo && <p className="err">{errors.docNo}</p>}
@@ -141,91 +209,55 @@ export function ExpDocForm(p: ExpDocFormProps) {
         </div>
         <p className="mt-2 text-xs text-[var(--muted)]">
           Lines are numbered {editing ? p.docBase : "BASE"}-01, -02 … A one-line document keeps just the base number. Changing a header field changes every line that still has the old value; each line can differ.
-          {!editing && ` Leave the number blank for Chq-nnnnn (Chq) or RPnnnnn, or type your own such as NOC-0419.`}
+          {!editing && " Leave the number blank for Chq-nnnnn (Chq) or RPnnnnn, or type your own such as NOC-0419."}
         </p>
       </section>
 
-      <section className="card overflow-x-auto">
-        <h2 className="h2">Lines ({lines.length})</h2>
-        <table className="table min-w-[1100px]">
-          <thead>
-            <tr><th>#</th><th>Head</th><th>R/P</th><th>Mode</th><th className="text-right">Gross</th><th className="text-right">GST</th><th className="text-right">TDS</th><th>BkgID</th><th>Employee</th><th>Narration</th><th></th></tr>
-          </thead>
-          <tbody>
-            {lines.map((l, i) => {
-              const showDetails = open.has(i) || isChq(l);
-              const b = bookingById.get(String(l.bkgId ?? "").toUpperCase());
-              return (
-                <Fragment key={i}>
-                  <tr className={err(i, "head") || err(i, "gross") ? "bg-red-50" : ""}>
-                    <td className="text-xs text-[var(--muted)]">{i + 1}</td>
-                    <td>
-                      <select className={`input ${err(i, "head") ? "border-red-500" : ""}`} value={String(l.head ?? "")} title={err(i, "head") ?? undefined} onChange={(e) => setL(i, "head", e.target.value || null)}>
-                        <option value="">—</option>{p.heads.map((h) => <option key={h.head} value={h.head}>{h.head}</option>)}
-                      </select>
-                      <div className="text-[10px] text-[var(--muted)]">{typeOf.get(String(l.head ?? "")) ?? ""}</div>
-                    </td>
-                    <td>
-                      <select className="input" value={String(l.rp ?? "")} onChange={(e) => setL(i, "rp", e.target.value)}><option>Receipt</option><option>Payment</option></select>
-                    </td>
-                    <td>
-                      <select className={`input ${err(i, "mode") ? "border-red-500" : ""}`} value={String(l.mode ?? "")} title={err(i, "mode") ?? undefined} onChange={(e) => setL(i, "mode", e.target.value || null)}>
-                        <option value="">—</option>{p.modes.map((m) => <option key={m}>{m}</option>)}
-                      </select>
-                    </td>
-                    <td>{cell(i, "gross", { inputMode: "decimal", className: `input text-right ${err(i, "gross") ? "border-red-500" : ""}` })}</td>
-                    <td>{cell(i, "gst", { inputMode: "decimal", className: "input w-20 text-right" })}</td>
-                    <td>{cell(i, "tds", { inputMode: "decimal", className: "input w-20 text-right" })}</td>
-                    <td>
-                      {cell(i, "bkgId", { list: "bkg-list", placeholder: COMPANY.idExample })}
-                      <div className="max-w-[150px] truncate text-[10px] text-[var(--muted)]">{b ? `${b.client} · ${b.project}` : err(i, "bkgId") ?? ""}</div>
-                    </td>
-                    <td>{cell(i, "emp", { list: "emp-list", placeholder: "Type to search" })}{err(i, "emp") && <div className="err">{err(i, "emp")}</div>}</td>
-                    <td>{cell(i, "narration")}</td>
-                    <td className="whitespace-nowrap">
-                      <button type="button" className="btn" title="More fields" onClick={() => toggle(i)}>{showDetails ? "▴" : "▾"}</button>{" "}
-                      <button type="button" className="btn" title="Duplicate line" onClick={() => dupLine(i)}>⧉</button>{" "}
-                      <button type="button" className="btn btn-danger" title="Remove line" disabled={lines.length === 1} onClick={() => delLine(i)}>×</button>
-                    </td>
-                  </tr>
-                  {showDetails && (
-                    <tr className="bg-slate-50">
-                      <td></td>
-                      <td colSpan={10}>
-                        <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-                          <div><span className="label">Pay date</span>{cell(i, "payDate", { type: "date" })}</div>
-                          <div><span className="label">Value date</span>{cell(i, "valueDate", { type: "date" })}</div>
-                          <div><span className="label">Branch</span>{cell(i, "branch")}</div>
-                          <div><span className="label">Project (if no booking)</span>{cell(i, "project", { list: "project-list", disabled: Boolean(b) })}</div>
-                          <div><span className="label">Remarks</span>{cell(i, "remarks")}</div>
-                          {isChq(l) && (
-                            <>
-                              <div><span className="label">Purpose *</span>{cell(i, "purpose", { list: "chq-purposes", placeholder: "Booking Amt, Part…" })}{err(i, "purpose") && <p className="err">{err(i, "purpose")}</p>}</div>
-                              <div><span className="label">PaymentMode *</span>{cell(i, "paymentMode", { list: "chq-paymodes", placeholder: "Cheque, RTGS, UPI…" })}{err(i, "paymentMode") && <p className="err">{err(i, "paymentMode")}</p>}</div>
-                              <div><span className="label">Bank Name</span>{cell(i, "chqBank", { list: "chq-banks" })}</div>
-                              <div><span className="label">Chq / UTR No *</span>{cell(i, "instrNo")}{err(i, "instrNo") && <p className="err">{err(i, "instrNo")}</p>}</div>
-                              <div><span className="label">Chq / UTR Date *</span>{cell(i, "instrDate", { type: "date" })}{err(i, "instrDate") && <p className="err">{err(i, "instrDate")}</p>}</div>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-        <datalist id="bkg-list">{p.bookings.map((b) => <option key={b.id} value={b.id}>{b.client} · {b.project}</option>)}</datalist>
-        <datalist id="emp-list">{p.employees.map((n) => <option key={n} value={n} />)}</datalist>
+      <section className="card p-0">
+        <div className="flex flex-wrap items-center gap-3 px-5 pt-4">
+          <h2 className="h2 mb-0">Lines ({lines.length})</h2>
+          <span className="text-xs text-[var(--muted)]">Every field of a line is in one row — scroll sideways for the rest. Cheque / UTR columns are for Mode Chq.</span>
+          <button type="button" className="btn ml-auto" onClick={addLine}>+ Add line</button>
+        </div>
+        <div className="mt-3 max-h-[60vh] overflow-auto border-t border-[var(--line)]">
+          <table className="table border-separate" style={{ minWidth: 70 + COLS.reduce((s, c) => s + c.w, 0) + 130 }}>
+            <thead>
+              <tr>
+                <th className="sticky left-0 z-[3] w-[70px] min-w-[70px] bg-slate-50">#</th>
+                {COLS.map((c) => <th key={c.k} className={c.right ? "text-right" : ""} style={{ minWidth: c.w }}>{c.label}</th>)}
+                <th className="sticky right-0 z-[3] min-w-[130px] bg-slate-50 text-right">Line</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((l, i) => (
+                <tr key={i}>
+                  <td className="sticky left-0 z-[1] bg-white text-xs text-[var(--muted)]">{i + 1}{l.id === undefined && editing ? <span className="ml-1 text-emerald-600" title="new line">●</span> : null}</td>
+                  {COLS.map((c) => <td key={c.k} style={{ minWidth: c.w }} className={err(i, c.k) ? "bg-red-50" : ""}>{cell(i, c)}</td>)}
+                  <td className="sticky right-0 z-[1] whitespace-nowrap bg-white text-right">
+                    <button type="button" className="btn h-7 px-2" title="Duplicate line" onClick={() => dupLine(i)}>⧉ Copy</button>{" "}
+                    <button type="button" className="btn btn-danger h-7 px-2" title="Remove line" disabled={lines.length === 1} onClick={() => delLine(i)}>✕</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         <datalist id="project-list">{p.projects.map((x) => <option key={x} value={x} />)}</datalist>
         <datalist id="chq-purposes">{(p.chqLists?.purposes ?? []).map((x) => <option key={x} value={x} />)}</datalist>
         <datalist id="chq-paymodes">{(p.chqLists?.paymentModes ?? []).map((x) => <option key={x} value={x} />)}</datalist>
         <datalist id="chq-banks">{(p.chqLists?.banks ?? []).map((x) => <option key={x} value={x} />)}</datalist>
-        <div className="mt-3"><button type="button" className="btn" onClick={addLine}>+ Add line</button></div>
+        {lineErrors.length > 0 && (
+          <div className="border-t border-red-200 bg-red-50 px-5 py-3 text-sm text-red-800">
+            <b>Please fix:</b>
+            <ul className="mt-1 list-disc pl-5">
+              {lineErrors.slice(0, 12).map((e, n) => <li key={n}>Line {e.i + 1} · {labelOf(e.k)}: {e.v}</li>)}
+              {lineErrors.length > 12 && <li>…and {lineErrors.length - 12} more</li>}
+            </ul>
+          </div>
+        )}
       </section>
 
-      <section className="card flex flex-wrap items-center gap-4">
+      <section className="card flex flex-wrap items-center gap-4 py-3">
         <span className="text-sm">Receipts <b>₹{fmtNum(totals.rec)}</b></span>
         <span className="text-sm">Payments <b>₹{fmtNum(totals.pay)}</b></span>
         <span className="text-sm text-[var(--muted)]">Net ₹{fmtNum(totals.net)} · {lines.length} line{lines.length === 1 ? "" : "s"}</span>
