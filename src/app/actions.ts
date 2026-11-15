@@ -120,6 +120,12 @@ export async function expRequestAction(action: "create" | "update" | "delete", d
   if (r.ok) revalidatePath("/", "layout");
   return r;
 }
+export async function expDocAction(action: "create_doc" | "update_doc" | "delete_doc", data: Record<string, unknown>, base?: string | null) {
+  const user = await requireUser(["admin", "master"]);
+  const r = await ch.requestExpDoc(user, action, data, base);
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+}
 export async function empRequestAction(action: "create" | "change" | "correct" | "exit", data: Record<string, unknown>) {
   const user = await requireUser(["hr", "master"]);
   const r = await ch.requestEmp(user, action, data);
@@ -141,6 +147,30 @@ export async function withdrawChangeAction(id: number) {
   const r = await ch.withdrawChange(user, id);
   revalidatePath("/", "layout");
   return r;
+}
+
+// ---- Projection targets (Master only)
+export async function saveProjectionAction(year: number, rows: { empCode: string; manMonths: number | null; bkgCount: number | null; directorRevenue: number | null; remarks: string | null }[]) {
+  await requireUser(["master"]);
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) return { ok: false, message: "Choose a valid year" };
+  const db = await getDb();
+  const emps = new Set((await db.selectDistinct({ e: s.employees.emp }).from(s.employees)).map((x) => (x.e.split("~")[1] ?? "").toLowerCase()));
+  const errors: string[] = [];
+  rows.forEach((r, i) => {
+    if (!r.empCode || !emps.has(r.empCode.trim().toLowerCase())) errors.push(`Row ${i + 1}: ${r.empCode || "employee code"} is not in Emp`);
+    for (const v of [r.manMonths, r.bkgCount, r.directorRevenue]) if (v !== null && (!Number.isFinite(v) || v < 0)) errors.push(`Row ${i + 1}: figures must be positive numbers`);
+  });
+  if (errors.length) return { ok: false, message: errors.slice(0, 5).join(" · ") };
+  await db.transaction(async (tx) => {
+    await tx.delete(s.projections).where(eq(s.projections.year, year));
+    if (rows.length)
+      await tx.insert(s.projections).values(rows.map((r, i) => ({
+        year, seq: i, empCode: r.empCode.trim(), manMonths: r.manMonths, bkgCount: r.bkgCount, directorRevenue: r.directorRevenue, remarks: r.remarks?.trim() || null,
+      })));
+  });
+  revalidatePath("/reports/projection");
+  revalidatePath("/admin/projection");
+  return { ok: true, message: `Saved ${rows.length} rows for ${year}` };
 }
 
 // ---- Masters (Master only)

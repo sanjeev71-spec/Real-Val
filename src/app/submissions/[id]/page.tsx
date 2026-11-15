@@ -9,6 +9,7 @@ import { ACTION_LABEL } from "@/lib/format";
 import { StatusPill } from "@/components/StatusPill";
 import { BookingView } from "@/components/BookingView";
 import { ActionPanel } from "@/components/ActionPanel";
+import { COMPANY } from "../../../lib/company";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="h1">SCD #{sub.id}</h1>
+        <h1 className="h1">{COMPANY.form} #{sub.id}</h1>
         <StatusPill status={sub.status} />
         {sub.bkgId && <Link className="btn" href={`/bookings/${sub.bkgId}`}>Booking {sub.bkgId}</Link>}
         {canEdit && <Link className="btn ml-auto" href={`/submissions/${sub.id}/edit`}>{sub.status === "returned" ? "Edit & resubmit" : "Edit fields"}</Link>}

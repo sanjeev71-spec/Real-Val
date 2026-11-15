@@ -12,7 +12,7 @@ export async function GET() {
   const rows = await expWithCalc();
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Exp");
-  const dates = new Set(["PayDate", "ValueDate"]);
+  const dates = new Set(["PayDate", "ValueDate", "Chq/UTR Date"]);
   ws.columns = EXP_COLUMNS.map((c) => ({ header: c, key: c, width: Math.max(10, c.length + 2), style: dates.has(c) ? { numFmt: "dd-mm-yyyy" } : {} }));
   for (const r of [...rows].reverse())
     ws.addRow(Object.fromEntries(EXP_COLUMNS.map((c) => [c, dates.has(c) && typeof r[c] === "string" ? new Date(`${r[c]}T00:00:00Z`) : r[c] ?? null])));

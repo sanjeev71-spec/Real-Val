@@ -26,7 +26,10 @@ export default async function ChangePage({ params }: { params: Promise<{ id: str
   const d = cr.data as Record<string, unknown>;
   const before = (cr.before ?? {}) as Record<string, unknown>;
   const after: Record<string, unknown> = cr.entity === "emp" && d.changes ? (d.changes as Record<string, unknown>) : d;
-  const keys = Object.keys(after).filter((k) => !HIDE.has(k) && k !== "changes" && k !== "reassign" && (canSeePII || !PII.has(k)));
+  const keys = Object.keys(after).filter((k) => !HIDE.has(k) && k !== "changes" && k !== "reassign" && k !== "lines" && (canSeePII || !PII.has(k)));
+  const lines = Array.isArray(d.lines) ? (d.lines as Record<string, unknown>[]) : null;
+  const beforeLines = Array.isArray(before.lines) ? (before.lines as Record<string, unknown>[]) : [];
+  const LINE_COLS = ["docNo", "head", "rp", "mode", "gross", "gst", "tds", "bkgId", "emp", "payDate", "narration", "instrNo", "paymentMode"];
   const nudgeWait = cr.lastNudgeAt ? Math.max(0, NUDGE_HOURS * 3600_000 - (Date.now() - cr.lastNudgeAt.getTime())) : 0;
 
   return (
@@ -49,7 +52,7 @@ export default async function ChangePage({ params }: { params: Promise<{ id: str
 
       {keys.length > 0 && (
         <section className="card overflow-x-auto">
-          <h2 className="h2">{cr.action === "create" ? "New values" : cr.action === "delete" ? "Entry to delete" : "Changes"}</h2>
+          <h2 className="h2">{cr.action === "create" || cr.action === "create_doc" ? "New values" : cr.action === "delete" ? "Entry to delete" : "Document"}</h2>
           <table className="table">
             <thead><tr><th>Field</th>{cr.before && cr.action !== "delete" && <th>Before</th>}<th>{cr.action === "delete" ? "Value" : "After"}</th></tr></thead>
             <tbody>
@@ -65,6 +68,31 @@ export default async function ChangePage({ params }: { params: Promise<{ id: str
               })}
             </tbody>
           </table>
+        </section>
+      )}
+      {lines && (
+        <section className="card overflow-x-auto">
+          <h2 className="h2">{cr.action === "delete_doc" ? "Lines to delete" : `Lines (${lines.length})`}</h2>
+          <table className="table">
+            <thead><tr><th>#</th>{LINE_COLS.map((c) => <th key={c}>{c}</th>)}<th></th></tr></thead>
+            <tbody>
+              {lines.map((l, i) => {
+                const old = beforeLines.find((b) => b.id !== undefined && b.id === l.id);
+                const isNew = cr.action === "update_doc" && l.id === undefined;
+                const changed = old ? LINE_COLS.filter((c) => c !== "docNo" && show(old[c]) !== show(l[c])) : [];
+                return (
+                  <tr key={i} className={isNew ? "bg-green-50" : changed.length ? "bg-amber-50" : ""}>
+                    <td className="text-xs text-[var(--muted)]">{i + 1}</td>
+                    {LINE_COLS.map((c) => <td key={c} className={changed.includes(c) ? "font-semibold" : ""} title={changed.includes(c) ? `before: ${show(old?.[c])}` : undefined}>{show(c === "docNo" ? l.docNo ?? old?.docNo : l[c])}</td>)}
+                    <td className="text-xs">{isNew ? "new" : changed.length ? "changed" : ""}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {cr.action === "update_doc" && beforeLines.filter((b) => !lines.some((l) => l.id === b.id)).length > 0 && (
+            <p className="mt-2 text-sm text-red-700">Removed lines: {beforeLines.filter((b) => !lines.some((l) => l.id === b.id)).map((b) => show(b.docNo)).join(", ")}</p>
+          )}
         </section>
       )}
       {Array.isArray(d.reassign) && (d.reassign as unknown[]).length > 0 && (

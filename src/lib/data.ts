@@ -6,6 +6,7 @@ import { Hierarchy, type EmpRow, type OverrideRule } from "./calc/hierarchy";
 import { isoToSerial, str } from "./calc/excel";
 import { SOLD_STATUSES } from "./fields";
 import type { MasterData } from "./masters";
+import { COMPANY } from "./company";
 
 const serial = (d: string | null) => (d === null ? null : isoToSerial(d));
 
@@ -131,24 +132,27 @@ export async function usersByRole(role: "master" | "admin" | "sales") {
 
 // ---------------------------------------------------------------- Emp & Exp views
 
-import { computeEmp, empDirector } from "./calc/emp";
+import { empDirector } from "./calc/emp";
+import { ensureEmpDerived } from "./empSync";
 import { computeExp, type BookingRef, type ExpInput, type ExpRow as ExpComputedRow } from "./calc/exp";
 
 export type EmployeeRecord = typeof s.employees.$inferSelect;
 
-/** All Emp period rows with their calculated columns (Director, DaysWorked, ManMonths, SeatCost). */
+/** All Emp period rows with their calculated columns (Director, chain, DaysWorked, ManMonths, SeatCost), read from the stored columns. */
 export async function employeesWithCalc() {
+  await ensureEmpDerived(); // refreshes open periods once a day, and after any Emp change
   const db = await getDb();
   const rows = await db.select().from(s.employees).orderBy(asc(s.employees.seq));
-  const today = todaySerial();
-  const H = new Hierarchy(rows.map((r) => toEmpRow(r, today)));
-  // Days worked / man-months / seat cost of an open period run to today (or 0 if it starts in the future)
-  return rows.map((r, i) => ({
+  return rows.map((r) => ({
     ...r,
-    calc: computeEmp(H, H.rows[i], {
-      applicable: r.applicable, type: r.type, doj: serial(r.doj),
-      to: r.changeDateTo === null ? Math.max(today, serial(r.changeDateFrom)!) : undefined,
-    }),
+    calc: {
+      director: r.director ?? "",
+      chainPath: r.chainPath ?? "",
+      daysWorked: r.daysWorked ?? 0,
+      manMonths: r.manMonths ?? 0,
+      seatCost: r.seatCost ?? 0,
+      key: `${(r.emp.split("~")[1] ?? "")}|${String(serial(r.changeDateFrom) ?? 0).padStart(6, "0")}`,
+    },
   }));
 }
 
@@ -192,6 +196,7 @@ export async function expContext() {
 export const expInputOf = (e: typeof s.expEntries.$inferSelect): ExpInput => ({
   docNo: e.docNo, payDate: e.payDate, valueDate: e.valueDate, head: e.head, mode: e.mode, narration: e.narration, rp: e.rp,
   gross: e.gross, gst: e.gst, tds: e.tds, branch: e.branch, emp: e.emp, bkgId: e.bkgId, project: e.project, remarks: e.remarks,
+  purpose: e.purpose, paymentMode: e.paymentMode, instrNo: e.instrNo, instrDate: e.instrDate, chqBank: e.chqBank, relatedEmpName: e.relatedEmpName,
 });
 
 /** Every Exp entry with its calculated columns, newest first. */
@@ -211,6 +216,17 @@ export async function expHeadList() {
   return db.select().from(s.expHeads).orderBy(asc(s.expHeads.head));
 }
 
+/** Suggestions for the cheque / UTR fields: values already used, most frequent first. */
+async function chqLists() {
+  const db = await getDb();
+  const top = async (col: string) => {
+    const r = await db.execute(sql.raw(`select ${col} as v from exp_entries where ${col} is not null and ${col} <> '' group by ${col} order by count(*) desc limit 60`));
+    return (("rows" in r ? r.rows : r) as { v: string }[]).map((x) => x.v);
+  };
+  const [purposes, paymentModes, banks] = await Promise.all([top("purpose"), top("payment_mode"), top("bank_name")]);
+  return { purposes, paymentModes, banks };
+}
+
 /** Dropdown data for the Exp form. */
 export async function expFormData() {
   const db = await getDb();
@@ -227,6 +243,7 @@ export async function expFormData() {
     employees: emp.map((e) => e.emp),
     projects: projects.map((p) => p.name),
     bookings: bookings.map((b) => ({ id: b.id, client: String(b.data.Client ?? ""), emp: String(b.data.Emp ?? ""), project: String(b.data.Project ?? "") })),
+    chqLists: await chqLists(),
   };
 }
 
@@ -269,7 +286,7 @@ export interface OrgNode {
   leftOn: string | null;
 }
 
-export const DEFAULT_PARTNERS = ["Pratham Goyal~100031", "Pawan Bedi~200001", "Tarun Kumar~100030", "Aditya Goel~200002"];
+export const DEFAULT_PARTNERS = COMPANY.defaultPartners;
 
 export async function partners(): Promise<string[]> {
   const v = await getSetting("partners");
@@ -298,4 +315,117 @@ export async function orgNodes(): Promise<OrgNode[]> {
       leftOn: r.changeDateTo,
     };
   });
+}
+
+// ---------------------------------------------------------------- P&L
+import { SEAT_EXEMPT_DAYS } from "./calc/emp";
+import type { PnlData } from "./calc/pnl";
+import { num as numOf } from "./calc/excel";
+
+let pnlCache: { at: number; data: PnlData } | null = null;
+let coreCache: { at: number; bk: BookingRow[]; exps: Awaited<ReturnType<typeof expWithCalc>> } | null = null;
+
+/** The two heavy reads every report builds on (computed bookings and computed Exp), cached for 30 s. */
+export async function loadCore() {
+  if (coreCache && Date.now() - coreCache.at < 30_000) return coreCache;
+  const [bk, exps] = await Promise.all([computedBookings(), expWithCalc()]);
+  coreCache = { at: Date.now(), bk, exps };
+  return coreCache;
+}
+
+/** Everything the P&L reports read: computed bookings, computed Exp, and the Emp periods (cached for 30 s - it is a heavy read). */
+export async function loadPnlData(): Promise<PnlData> {
+  if (pnlCache && Date.now() - pnlCache.at < 30_000) return pnlCache.data;
+  await ensureEmpDerived();
+  const db = await getDb();
+  const [{ bk, exps }, emp] = await Promise.all([loadCore(), db.select().from(s.employees).orderBy(asc(s.employees.seq))]);
+  const today = todaySerial();
+  const data: PnlData = {
+    bookings: bk.map((r) => ({
+      status: String(r.FormStatus ?? ""),
+      month: isoToSerial(r.BkgMonth as string) ?? 0,
+      director: String(r.Director ?? ""),
+      rev: numOf(r.DirectorRevenue) + numOf(r.SpinToWin) + numOf(r.IncentivePOC) + numOf(r.IncentiveBuilder),
+      depth: numOf(r.RS_Depth),
+      levels: [0, 1, 2, 3, 4].map((k) => ({ emp: String(r[`L${k}_Emp`] ?? ""), share: numOf(r[`L${k}_Share`]), shareRA: numOf(r[`L${k}_SharexRA`]) })),
+      overrideEmp: String(r.Override_Emp ?? ""),
+      overrideShare: numOf(r.Override_Share),
+      overrideShareRA: numOf(r.Override_SharexRA),
+    })),
+    exps: exps.map((r) => ({
+      head: String(r.Head ?? ""), expType: String(r.ExpType ?? ""), director: String(r.Director ?? ""),
+      date: isoToSerial(r.ValueDate as string) ?? 0,
+      l0Emp: String(r.L0_Emp ?? ""), l0Amt: numOf(r.L0_Amt), l1Emp: String(r.L1_Emp ?? ""), l1Amt: numOf(r.L1_Amt),
+    })),
+    seats: emp.map((r) => {
+      const from = serial(r.changeDateFrom)!;
+      const seatApplies = r.applicable === "Y" && r.type === "Sales";
+      return {
+        director: r.director ?? "",
+        start: seatApplies ? Math.max(from, (serial(r.doj) ?? from) + SEAT_EXEMPT_DAYS) : null,
+        to: r.changeDateTo === null ? Math.max(today, from) : serial(r.changeDateTo)!,
+        positive: (r.seatCost ?? 0) > 0,
+      };
+    }),
+    edges: emp.map((r) => ({ code: r.emp.split("~")[1] ?? "", name: r.emp, headCode: r.reportingHead.split("~")[1] ?? "", revShare: r.revShare ?? 0 })),
+  };
+  pnlCache = { at: Date.now(), data };
+  return data;
+}
+
+/** Directors that appear in Emp (by code, with the latest spelling of the name), sorted by name. */
+export async function pnlDirectors(): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db.select({ emp: s.employees.emp, director: s.employees.director }).from(s.employees);
+  const names = new Map<string, string>();
+  for (const r of rows) {
+    const c = (r.emp.split("~")[1] ?? "").toLowerCase();
+    if (c && !names.has(c)) names.set(c, r.emp);
+  }
+  const out = new Set<string>();
+  for (const r of rows) {
+    const c = (r.director?.split("~")[1] ?? "").toLowerCase();
+    if (c) out.add(names.get(c) ?? r.director!);
+  }
+  return [...out].sort((a, b) => a.localeCompare(b));
+}
+
+// ---------------------------------------------------------------- Projection
+import type { ProjActuals, ProjRow } from "./calc/projection";
+
+export async function projectionRows(year: number) {
+  const db = await getDb();
+  return db.select().from(s.projections).where(eq(s.projections.year, year)).orderBy(asc(s.projections.seq), asc(s.projections.id));
+}
+export async function projectionYears(): Promise<number[]> {
+  const db = await getDb();
+  const r = await db.selectDistinct({ y: s.projections.year }).from(s.projections).orderBy(asc(s.projections.year));
+  return r.map((x) => x.y);
+}
+export const toProjRow = (r: typeof s.projections.$inferSelect): ProjRow => ({
+  empCode: r.empCode, manMonths: r.manMonths ?? 0, bkgCount: r.bkgCount ?? 0, revenue: r.directorRevenue ?? 0, remarks: r.remarks,
+});
+
+/** Actuals the Projection report compares against: sold bookings by their Emp, and the Emp periods. */
+export async function projectionActuals(): Promise<ProjActuals> {
+  await ensureEmpDerived();
+  const db = await getDb();
+  const [{ bk }, emp] = await Promise.all([loadCore(), db.select().from(s.employees).orderBy(asc(s.employees.seq))]);
+  const today = todaySerial();
+  const people = new Map<string, { name: string; director: string; from: string }>();
+  for (const r of emp) {
+    const k = (r.emp.split("~")[1] ?? "").toLowerCase();
+    const cur = people.get(k);
+    if (!cur || r.changeDateFrom > cur.from) people.set(k, { name: r.emp, director: r.director ?? "", from: r.changeDateFrom });
+  }
+  return {
+    bookings: bk
+      .filter((r) => SOLD_STATUSES.includes(String(r.FormStatus ?? "").trim()))
+      .map((r) => ({ empCode: String(r.Emp ?? "").split("~")[1] ?? "", month: isoToSerial(r.BkgMonth as string) ?? 0, rev: numOf(r.DirectorRevenue) })),
+    periods: emp.map((r) => {
+      const from = serial(r.changeDateFrom)!;
+      return { code: r.emp.split("~")[1] ?? "", from, to: r.changeDateTo === null ? Math.max(today, from) : serial(r.changeDateTo)!, sales: r.type === "Sales" };
+    }),
+    people: new Map([...people].map(([k, v]) => [k, { name: v.name, director: v.director }])),
+  };
 }

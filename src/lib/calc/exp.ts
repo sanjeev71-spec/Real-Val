@@ -1,9 +1,10 @@
 // Calculated columns of the Excel Exp table.
 import { codeOf, eq, isoToSerial, num, round, serialToIso, str, type Cell } from "./excel";
 import { Hierarchy } from "./hierarchy";
+import { COMPANY } from "../company";
 
 /** Top of the company: when the chain reaches this code, it carries the whole expense as L1 (Excel used TV0022). */
-export const TOP_CODE = "200001";
+export const TOP_CODE = COMPANY.topCode;
 
 export interface ExpInput {
   docNo: string | null;
@@ -21,6 +22,12 @@ export interface ExpInput {
   bkgId: string | null;
   project: string | null; // used when there is no booking
   remarks?: string | null;
+  purpose?: string | null;
+  paymentMode?: string | null;
+  instrNo?: string | null;
+  instrDate?: string | number | null;
+  chqBank?: string | null;
+  relatedEmpName?: string | null;
 }
 
 export interface BookingRef {
@@ -109,6 +116,12 @@ export function computeExp(e: ExpInput, ctx: ExpContext): ExpRow {
     Project: bk ? bk.Project : e.project,
     Director: director,
     Remarks: e.remarks ?? null,
+    Purpose: e.purpose ?? null,
+    PaymentMode: e.paymentMode ?? null,
+    "Chq/UTR No": e.instrNo ?? null,
+    "Chq/UTR Date": e.instrDate === null || e.instrDate === undefined ? null : serialToIso(isoToSerial(e.instrDate as string)),
+    "Bank Name": e.chqBank ?? null,
+    RelatedEmpName: e.relatedEmpName ?? null,
     Rcv_Builder: bk ? bk.Builder : "",
     Rcv_Project: bk ? bk.Project : "",
     Rcv_Status: bk ? bk.FormStatus : "",
@@ -123,6 +136,6 @@ export function computeExp(e: ExpInput, ctx: ExpContext): ExpRow {
 
 export const EXP_COLUMNS = [
   "DocNo","PayDate","ValueDate","ExpMonth","ExpType","Head","Mode","Narration","R/P","Gross","GST","TDS","SignedGross",
-  "Branch","Emp","BkgID","Client","Project","Director","Remarks","Rcv_Builder","Rcv_Project","Rcv_Status","Rcv_FbBuilder",
+  "Branch","Emp","BkgID","Client","Project","Director","Remarks","Purpose","PaymentMode","Chq/UTR No","Chq/UTR Date","Bank Name","RelatedEmpName","Rcv_Builder","Rcv_Project","Rcv_Status","Rcv_FbBuilder",
   "Rcv_NetBill","L0_Emp","L0_Amt","L1_Emp","L1_Amt",
 ] as const;

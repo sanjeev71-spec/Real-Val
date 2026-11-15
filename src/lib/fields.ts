@@ -1,4 +1,5 @@
 // Column registry for the Bkg table. Keys are the exact Excel headers.
+import { COMPANY } from "./company";
 
 export const BKG_COLUMNS = [
   "BkgMonth","BkgLoginDate","FormStatus","SourceOfLead","PropertyType","Director","Emp","BkgID","Client","CoApplicant",
@@ -24,6 +25,9 @@ const COMPUTED = new Set<string>([
   ...[0, 1, 2, 3, 4].flatMap((k) => [`L${k}_Emp`, `L${k}_Share%`, `L${k}_Share`, `L${k}_SharexRA`]),
 ]);
 
+// TRPL keeps GST as an amount typed on the booking (blank = 0): it is an input there, not a calculated column.
+if (COMPANY.gstManual) COMPUTED.delete("GST");
+
 /** Columns a person (or the CSV upload) supplies. Everything else is calculated. */
 export const BKG_INPUT_KEYS: string[] = BKG_COLUMNS.filter((c) => !COMPUTED.has(c));
 
@@ -33,6 +37,7 @@ export const NUMBER_KEYS = new Set([
   "PaymentPlanDiscountPSF","OnFormDiscountPSF","PLCPSF","IFMSPSF","PowerBackupPSF","SinkingFundClubPSF","OtherChargesPSF",
   "BrokerAmt","CreditNoteAmt","RAAchievePertenage","CSlab","DSlab","ASlab","UnitAdj","DirectorSplRevenue","SpinToWin",
   "IncentivePOC","IncentiveRV","IncentiveBuilder",
+  ...(COMPANY.gstManual ? ["GST"] : []),
 ]);
 
 export const FORM_STATUSES = ["Not Live", "Live", "Cancel"] as const;

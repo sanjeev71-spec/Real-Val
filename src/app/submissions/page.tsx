@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { getDb, schema as s } from "@/lib/db";
 import { fmtDate, STATUS_LABEL } from "@/lib/format";
 import { StatusPill } from "@/components/StatusPill";
+import { COMPANY } from "../../lib/company";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,7 @@ export default async function Submissions({ searchParams }: { searchParams: Prom
 
   return (
     <div className="space-y-4">
-      <h1 className="h1">SCD Approval</h1>
+      <h1 className="h1">{COMPANY.form} Approval</h1>
       <div className="flex flex-wrap gap-2 text-sm">
         <Link className={`btn ${!status ? "btn-primary" : ""}`} href="/submissions">All</Link>
         {Object.entries(STATUS_LABEL).map(([k, v]) => (
@@ -50,7 +51,7 @@ export default async function Submissions({ searchParams }: { searchParams: Prom
                 </tr>
               );
             })}
-            {!visible.length && <tr><td colSpan={9} className="text-[var(--muted)]">No SCDs.</td></tr>}
+            {!visible.length && <tr><td colSpan={9} className="text-[var(--muted)]">No {COMPANY.form}s.</td></tr>}
           </tbody>
         </table>
       </div>

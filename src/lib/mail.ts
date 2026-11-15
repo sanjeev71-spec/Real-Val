@@ -1,5 +1,6 @@
 import "server-only";
 import nodemailer from "nodemailer";
+import { COMPANY } from "./company";
 
 export interface Mail {
   to: string | string[];
@@ -26,12 +27,12 @@ export async function sendMail(m: Mail): Promise<void> {
   }
   transport ??= nodemailer.createTransport({ service: "gmail", auth: { user, pass } });
   await transport.sendMail({
-    from: `"Realty Vault (no-reply)" <${user}>`,
+    from: `"${COMPANY.name} (no-reply)" <${user}>`,
     to,
     cc: m.cc,
     replyTo: m.replyTo ?? process.env.MASTER_EMAIL ?? undefined,
     subject: m.subject,
-    html: `${m.html}<hr><p style="color:#888;font-size:12px">Automated message from the Realty Vault booking system. Please do not reply to this address.</p>`,
+    html: `${m.html}<hr><p style="color:#888;font-size:12px">Automated message from the ${COMPANY.name} booking system. Please do not reply to this address.</p>`,
   });
 }
 

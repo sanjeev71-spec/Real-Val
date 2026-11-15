@@ -14,7 +14,7 @@ const load = (n: string) => JSON.parse(readFileSync(join(dir, `${n}.json`), "utf
 const same = (a: unknown, b: unknown) =>
   typeof a === "number" && typeof b === "number" ? Math.abs(a - b) < 1e-6 : String(a ?? "") === String(b ?? "");
 
-describe.skipIf(!hasData)("Exp and Emp calculations match Excel", () => {
+describe.skipIf(!hasData || process.env.NEXT_PUBLIC_COMPANY === "trpl")("Exp and Emp calculations match Excel", () => {
   const empJson = load("Emp");
   const H = new Hierarchy(empFromExcel(empJson));
   const directors = H.rows.map((r) => empDirector(H, r));

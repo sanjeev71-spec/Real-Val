@@ -9,6 +9,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { sql } from "drizzle-orm";
 import { getDb, schema as s } from "../src/lib/db";
+import { splitDocNo } from "../src/lib/docNo";
 import { serialToIso, str, num } from "../src/lib/calc/excel";
 import { BKG_INPUT_KEYS, DATE_KEYS } from "../src/lib/fields";
 
@@ -86,7 +87,7 @@ async function main() {
     if (exp.length)
       await tx.insert(s.expEntries).values(
         exp.map((r) => ({
-          docNo: t(r.DocNo), payDate: d(r.PayDate), valueDate: d(r.ValueDate), head: t(r.Head), mode: t(r.Mode),
+          docNo: t(r.DocNo), docBase: splitDocNo(t(r.DocNo)).base, lineNo: splitDocNo(t(r.DocNo)).line, payDate: d(r.PayDate), valueDate: d(r.ValueDate), head: t(r.Head), mode: t(r.Mode),
           rp: t(r["R/P"]), gross: n(r.Gross), gst: n(r.GST), tds: n(r.TDS), branch: t(r.Branch), bkgId: t(r.BkgID),
           project: t(r.Project), narration: t(r.Narration), remarks: t(r.Remarks),
         })),

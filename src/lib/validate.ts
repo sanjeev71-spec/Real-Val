@@ -3,6 +3,7 @@ import { codeOf, isoToSerial, str } from "./calc/excel";
 import { Hierarchy } from "./calc/hierarchy";
 import { BKG_INPUT_KEYS, DATE_KEYS, FORM_STATUSES, NUMBER_KEYS, SOLD_STATUSES } from "./fields";
 import { employeeNames, priceListFor, type FormData, type MasterData } from "./masters";
+import { COMPANY, idPattern } from "./company";
 
 export type Errors = Record<string, string>;
 
@@ -112,7 +113,7 @@ export function validateBooking(d: FormData, m: MasterData, o: ValidateOpts): Er
   for (const k of ["ContactNo", "Mobile2"]) if (d[k] && !/^\+?\d{10,13}$/.test(str(d[k]).replace(/[\s-]/g, ""))) e[k] = "Invalid mobile number";
 
   if (d.BkgID) {
-    if (!/^RV\d{4,}$/.test(str(d.BkgID))) e.BkgID = "BkgID must look like RV0123 (or leave blank to auto-generate)";
+    if (!idPattern.test(str(d.BkgID))) e.BkgID = `BkgID must look like ${COMPANY.idExample} (or leave blank to auto-generate)`;
     else if (o.existingBkgIds?.has(str(d.BkgID).toUpperCase())) e.BkgID = "BkgID already exists";
   }
   return e;

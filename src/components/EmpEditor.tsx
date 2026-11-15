@@ -3,6 +3,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { empRequestAction } from "@/app/actions";
 import { CORRECT_FIELDS, PERIOD_FIELDS, PERSON_FIELDS, type EmpField } from "@/lib/empFields";
+import { COMPANY } from "../lib/company";
 
 type Val = string | number | null;
 type Mode = "create" | "change" | "correct" | "exit";
@@ -17,7 +18,7 @@ export function EmpEditor(p: {
   const router = useRouter();
   const today = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
   const init: Record<string, Val> =
-    p.mode === "create" ? { type: "Sales", applicable: "Y", company: "RV", status: "Active", doj: today } : { ...(p.current ?? {}) };
+    p.mode === "create" ? { type: "Sales", applicable: "Y", company: COMPANY.empCompany, status: "Active", doj: today } : { ...(p.current ?? {}) };
   if (p.mode === "change") init.effectiveFrom = today;
   if (p.mode === "exit") init.exitDate = today;
   const [d, setD] = useState<Record<string, Val>>(init);

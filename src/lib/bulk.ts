@@ -9,6 +9,7 @@ import { BKG_INPUT_KEYS, FORM_STATUSES, NEW_BOOKING_DEFAULTS, PROPERTY_TYPES, SO
 import { insertBookings } from "./workflow";
 import { str } from "./calc/excel";
 import type { User } from "./auth";
+import { COMPANY } from "./company";
 
 export const TEMPLATE_COLUMNS = BKG_INPUT_KEYS;
 export const MAX_ROWS = 2000;
@@ -100,7 +101,7 @@ export async function templateXlsx(): Promise<Buffer> {
   [
     ["Delete the example row (row 2) before uploading. Save as .xlsx or CSV (UTF-8)."],
     ["Required: BkgLoginDate, Emp, Client, Project, UnitNo, FormStatus."],
-    ["BkgID: leave blank to auto-generate (RV0001...). Fill it only to keep an existing ID from another system."],
+    [`BkgID: leave blank to auto-generate (${COMPANY.idExample}...). Fill it only to keep an existing ID from another system.`],
     ["Dates: dd-mm-yyyy or yyyy-mm-dd. BkgMonth defaults to BkgLoginDate."],
     ["Blank cells are filled automatically: Builder/ProjectLocation (Project), Area (Inventory), BSPPSF/OtherChargesPSF/PaymentPlan/DSlab/DSlabType (Price List on the booking date), Branch (Associate's Emp row on the booking date)."],
     [`Defaults: ${Object.entries(NEW_BOOKING_DEFAULTS).map(([k, v]) => `${k} = ${v}`).join(", ")}.`],

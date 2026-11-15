@@ -8,6 +8,11 @@ export const CHANGE_STATUS: Record<string, string> = {
 };
 
 export function describeChange(entity: string, d: Record<string, unknown>) {
+  if (entity === "exp" && Array.isArray(d.lines)) {
+    const ls = d.lines as { rp?: string; gross?: number | string }[];
+    const net = ls.reduce((a, l) => a + (l.rp === "Receipt" ? 1 : -1) * (Number(l.gross) || 0), 0);
+    return `Document ${d.docBase ?? "(new)"} · ${ls.length} lines · net ₹${net}`;
+  }
   if (entity === "exp") return `${d.head ?? ""} · ${d.mode ?? ""} · ${d.rp ?? ""} ₹${d.gross ?? ""} · ${d.bkgId ?? ""} ${d.emp ?? ""}`;
   return String(d.emp ?? "");
 }

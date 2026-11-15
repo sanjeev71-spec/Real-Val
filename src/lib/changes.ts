@@ -1,11 +1,14 @@
 import "server-only";
-import { and, asc, eq, max, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, max, or, sql } from "drizzle-orm";
 import { getDb, schema as s, type DB } from "./db";
 import { appUrl, sendMail } from "./mail";
 import { activeModes, currentPeriods, expHeadList, todayIso, usersByRole } from "./data";
 import { str } from "./calc/excel";
 import { parseDate } from "./validate";
 import type { User } from "./auth";
+import { COMPANY } from "./company";
+import { resyncEmployees } from "./empSync";
+import { lineDocNo, splitDocNo, validDocBase } from "./docNo";
 
 type Tx = Parameters<Parameters<DB["transaction"]>[0]>[0];
 export type Errors = Record<string, string>;
@@ -21,15 +24,15 @@ const txt = (v: unknown) => (v === null || v === undefined || String(v).trim() =
 
 export const ENTITY_LABEL: Record<string, string> = { exp: "Exp", emp: "Emp" };
 export const ACTION_LABEL: Record<string, string> = {
-  create: "New entry", update: "Edit", delete: "Delete", change: "Effective change", correct: "Correct details", exit: "Exit",
+  create: "New entry", update: "Edit", delete: "Delete", create_doc: "New document", update_doc: "Edit document", delete_doc: "Delete document", change: "Effective change", correct: "Correct details", exit: "Exit",
 };
 
 // =================================================================== Exp
 
-export const EXP_FIELDS = ["payDate", "valueDate", "head", "mode", "rp", "gross", "gst", "tds", "branch", "bkgId", "emp", "project", "narration", "remarks"] as const;
+export const EXP_FIELDS = ["payDate", "valueDate", "head", "mode", "rp", "gross", "gst", "tds", "branch", "bkgId", "emp", "project", "narration", "remarks", "purpose", "paymentMode", "instrNo", "instrDate", "chqBank"] as const;
 export type ExpData = Record<(typeof EXP_FIELDS)[number], string | number | null>;
 
-export async function normalizeExp(raw: Record<string, unknown>): Promise<{ data: ExpData; errors: Errors }> {
+export async function normalizeExp(raw: Record<string, unknown>, selfId?: number | null): Promise<{ data: ExpData; errors: Errors }> {
   const db = await getDb();
   const d: ExpData = {
     payDate: parseDate(raw.payDate ?? "") ?? null,
@@ -46,6 +49,11 @@ export async function normalizeExp(raw: Record<string, unknown>): Promise<{ data
     project: txt(raw.project),
     narration: txt(raw.narration),
     remarks: txt(raw.remarks),
+    purpose: txt(raw.purpose),
+    paymentMode: txt(raw.paymentMode),
+    instrNo: txt(raw.instrNo),
+    instrDate: txt(raw.instrDate) ? parseDate(raw.instrDate) ?? null : null,
+    chqBank: txt(raw.chqBank),
   };
   const e: Errors = {};
   if (!isDate(d.payDate)) e.payDate = "Pay date is required (dd-mm-yyyy)";
@@ -56,6 +64,22 @@ export async function normalizeExp(raw: Record<string, unknown>): Promise<{ data
   const modes = await activeModes();
   if (!d.mode) e.mode = "Mode is required";
   else if (!modes.some((m) => m.toLowerCase() === str(d.mode).toLowerCase())) e.mode = "Not in the Mode master";
+  // Cheque / UTR details belong to Mode = Chq only
+  if (str(d.mode).toLowerCase() === "chq") {
+    if (!d.purpose) e.purpose = "Purpose is required for a Chq entry";
+    if (!d.paymentMode) e.paymentMode = "PaymentMode is required (Cheque, RTGS, UPI...)";
+    if (!d.instrNo) e.instrNo = "Chq / UTR No is required";
+    if (!isDate(d.instrDate)) e.instrDate = "Chq / UTR Date is required";
+  } else {
+    d.purpose = d.paymentMode = d.instrNo = d.instrDate = d.chqBank = null;
+  }
+  if (d.instrNo && d.instrDate && d.gross !== null && !e.instrNo) {
+    const dup = await db.select({ id: s.expEntries.id, docNo: s.expEntries.docNo }).from(s.expEntries)
+      .where(and(sql`lower(${s.expEntries.instrNo}) = ${str(d.instrNo).toLowerCase()}`, eq(s.expEntries.instrDate, str(d.instrDate)), eq(s.expEntries.gross, d.gross as number), eq(s.expEntries.rp, str(d.rp))))
+      .limit(3);
+    const other = dup.find((x) => x.id !== selfId);
+    if (other) e.instrNo = `Looks like a duplicate of ${other.docNo ?? "entry #" + other.id} (same Chq/UTR No, date and amount)`;
+  }
   if (d.rp !== "Receipt" && d.rp !== "Payment") e.rp = "Choose Receipt or Payment";
   for (const k of ["gross", "gst", "tds"] as const) {
     const v = d[k];
@@ -75,17 +99,20 @@ export async function normalizeExp(raw: Record<string, unknown>): Promise<{ data
   return { data: d, errors: e };
 }
 
-async function nextDocNo(tx: Tx): Promise<string> {
+/** Chq entries are numbered Chq-00001...; everything else RP00001... */
+async function nextDocNo(tx: Tx, mode: string | null): Promise<string> {
   await tx.execute(sql`select pg_advisory_xact_lock(424243)`);
-  const r = await tx.execute(sql`select max((substring(doc_no from 3))::int) as n from exp_entries where doc_no ~ '^RP[0-9]+$'`);
+  const prefix = str(mode).toLowerCase() === "chq" ? "Chq-" : "RP";
+  const r = await tx.execute(sql`select max((substring(doc_no from ${prefix.length + 1}::int))::int) as n from exp_entries where doc_no ~ ${"^" + prefix + "[0-9]+$"}`);
   const rows = ("rows" in r ? r.rows : r) as { n: number | null }[];
-  return `RP${String((rows[0]?.n ?? 0) + 1).padStart(5, "0")}`;
+  return `${prefix}${String((rows[0]?.n ?? 0) + 1).padStart(5, "0")}`;
 }
 
 async function applyExp(tx: Tx, action: string, targetId: number | null, d: ExpData, userId: number): Promise<string> {
+  if (action.endsWith("_doc")) return applyExpDoc(tx, action, d as unknown as ExpDocData, userId);
   if (action === "create") {
-    const docNo = await nextDocNo(tx);
-    await tx.insert(s.expEntries).values({ ...(d as Record<string, unknown>), docNo, createdBy: userId } as never);
+    const docNo = await nextDocNo(tx, d.mode as string | null);
+    await tx.insert(s.expEntries).values({ ...(d as Record<string, unknown>), docNo, docBase: docNo, lineNo: null, createdBy: userId } as never);
     return docNo;
   }
   const [cur] = await tx.select().from(s.expEntries).where(eq(s.expEntries.id, targetId!));
@@ -107,7 +134,7 @@ export async function requestExp(user: User, action: "create" | "update" | "dele
   let data: ExpData;
   if (action === "delete") data = before as never;
   else {
-    const n = await normalizeExp(raw);
+    const n = await normalizeExp(raw, targetId ?? null);
     if (Object.keys(n.errors).length) return { ok: false, errors: n.errors };
     data = n.data;
   }
@@ -169,7 +196,7 @@ export async function requestEmp(user: User, action: "create" | "change" | "corr
     if (!isDate(f.doj)) e.doj = "Date of joining is required";
     checkShare("revShare", f.revShare);
     checkShare("expShare", f.expShare);
-    data = { ...f, emp, status: f.status ?? "Active", company: f.company ?? "RV", applicable: f.applicable ?? "Y" };
+    data = { ...f, emp, status: f.status ?? "Active", company: f.company ?? COMPANY.empCompany, applicable: f.applicable ?? "Y" };
   }
 
   if (action === "change" || action === "correct" || action === "exit") {
@@ -234,7 +261,14 @@ async function splitPeriod(tx: Tx, periodId: number, to: string, changes: Record
   await tx.insert(s.employees).values({ ...copy, ...(changes as Record<string, unknown>), seq: await nextSeq(tx), changeDateFrom: addDays(to, 1), changeDateTo: null, exitDate: null } as never);
 }
 
+/** Applies an Emp change, then recomputes the derived columns (Director, chain, seat cost...) of every row. */
 async function applyEmp(tx: Tx, action: string, d: Record<string, unknown>): Promise<string> {
+  const ref = await applyEmpAction(tx, action, d);
+  await resyncEmployees(tx);
+  return ref;
+}
+
+async function applyEmpAction(tx: Tx, action: string, d: Record<string, unknown>): Promise<string> {
   if (action === "create") {
     const { emp, ...f } = d as Record<string, never>;
     await tx.insert(s.employees).values({ ...(f as object), emp, seq: await nextSeq(tx), changeDateFrom: (d.doj as string), changeDateTo: null } as never);
@@ -259,6 +293,124 @@ async function applyEmp(tx: Tx, action: string, d: Record<string, unknown>): Pro
   throw new Error(`Unknown action ${action}`);
 }
 
+// =================================================================== Exp documents (one transaction, many lines)
+
+export type ExpDocLine = ExpData & { id?: number };
+export interface ExpDocData { docBase: string | null; lines: ExpDocLine[] }
+const MAX_DOC_LINES = 300;
+
+/** All lines of a document, in line order. The base also matches rows imported without a doc_base. */
+export async function docLines(db: DB | Tx, base: string) {
+  return db.select().from(s.expEntries)
+    .where(or(eq(s.expEntries.docBase, base), and(sql`${s.expEntries.docBase} is null`, eq(s.expEntries.docNo, base))))
+    .orderBy(asc(s.expEntries.lineNo), asc(s.expEntries.id));
+}
+
+/** Validates every line (header defaults are already merged in by the form) and, for a new document, the typed number. */
+export async function normalizeExpDoc(raw: Record<string, unknown>, existingBase: string | null): Promise<{ data: ExpDocData; errors: Errors }> {
+  const db = await getDb();
+  const errors: Errors = {};
+  const rawLines = Array.isArray(raw.lines) ? (raw.lines as Record<string, unknown>[]) : [];
+  if (!rawLines.length) errors.lines = "Add at least one line";
+  if (rawLines.length > MAX_DOC_LINES) errors.lines = `A document can have up to ${MAX_DOC_LINES} lines`;
+
+  let docBase: string | null = existingBase;
+  if (!existingBase) {
+    const typed = txt(raw.docNo);
+    if (typed) {
+      if (!validDocBase(typed)) errors.docNo = "Use letters, digits and - _ . / only (2 to 40 characters)";
+      else {
+        const clash = await db.select({ id: s.expEntries.id }).from(s.expEntries)
+          .where(or(sql`lower(${s.expEntries.docBase}) = ${typed.toLowerCase()}`, sql`lower(${s.expEntries.docNo}) = ${typed.toLowerCase()}`)).limit(1);
+        if (clash.length) errors.docNo = "This document number is already used";
+        docBase = typed;
+      }
+    }
+  }
+
+  const lines: ExpDocLine[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < Math.min(rawLines.length, MAX_DOC_LINES); i++) {
+    const rl = rawLines[i];
+    const id = typeof rl.id === "number" ? rl.id : undefined;
+    const n = await normalizeExp(rl, id ?? null);
+    for (const [k, v] of Object.entries(n.errors)) errors[`line.${i}.${k}`] = v;
+    if (n.data.instrNo && n.data.instrDate) {
+      const key = [str(n.data.instrNo).toLowerCase(), n.data.instrDate, n.data.gross, n.data.rp].join("|");
+      if (seen.has(key)) errors[`line.${i}.instrNo`] = "Same Chq/UTR No, date and amount appears twice in this document";
+      seen.add(key);
+    }
+    lines.push({ ...n.data, ...(id !== undefined ? { id } : {}) });
+  }
+  return { data: { docBase, lines }, errors };
+}
+
+/** Next document number: Chq-nnnnn for a Chq document, RPnnnnn otherwise (looks at document numbers, not lines). */
+async function nextDocBase(tx: Tx, mode: string | null): Promise<string> {
+  await tx.execute(sql`select pg_advisory_xact_lock(424243)`);
+  const prefix = str(mode).toLowerCase() === "chq" ? "Chq-" : "RP";
+  const r = await tx.execute(sql`select max((substring(doc_base from ${prefix.length + 1}::int))::int) as n from exp_entries where doc_base ~ ${"^" + prefix + "[0-9]+$"}`);
+  const rows = ("rows" in r ? r.rows : r) as { n: number | null }[];
+  return `${prefix}${String((rows[0]?.n ?? 0) + 1).padStart(5, "0")}`;
+}
+
+const lineValues = (l: ExpDocLine) => Object.fromEntries(EXP_FIELDS.map((k) => [k, l[k] ?? null]));
+
+async function applyExpDoc(tx: Tx, action: string, d: ExpDocData, userId: number): Promise<string> {
+  if (action === "create_doc") {
+    const base = d.docBase ?? (await nextDocBase(tx, d.lines[0]?.mode as string | null));
+    const clash = await tx.select({ id: s.expEntries.id }).from(s.expEntries).where(or(eq(s.expEntries.docBase, base), eq(s.expEntries.docNo, base))).limit(1);
+    if (clash.length) throw new Error(`Document ${base} already exists`);
+    const single = d.lines.length === 1;
+    await tx.insert(s.expEntries).values(d.lines.map((l, i) => ({
+      ...lineValues(l), docBase: base, lineNo: single ? null : i + 1, docNo: single ? base : lineDocNo(base, i + 1), createdBy: userId,
+    })) as never);
+    return base;
+  }
+
+  const base = d.docBase;
+  if (!base) throw new Error("Document number missing");
+  const cur = await docLines(tx, base);
+  if (!cur.length) throw new Error(`Document ${base} no longer exists`);
+  if (action === "delete_doc") {
+    await tx.delete(s.expEntries).where(inArray(s.expEntries.id, cur.map((c) => c.id)));
+    return base;
+  }
+  // update_doc: lines with an id are edited, lines without one are added, lines left out are removed
+  const keep = new Set(d.lines.filter((l) => l.id !== undefined).map((l) => l.id!));
+  for (const l of d.lines) if (l.id !== undefined && !cur.some((c) => c.id === l.id)) throw new Error("A line of this document was changed or removed meanwhile - reopen it");
+  const gone = cur.filter((c) => !keep.has(c.id)).map((c) => c.id);
+  if (gone.length) await tx.delete(s.expEntries).where(inArray(s.expEntries.id, gone));
+  for (const l of d.lines) {
+    if (l.id !== undefined) await tx.update(s.expEntries).set({ ...lineValues(l), updatedAt: new Date() } as never).where(eq(s.expEntries.id, l.id));
+  }
+  let next = Math.max(0, ...cur.map((c) => c.lineNo ?? 0)) + 1;
+  for (const l of d.lines.filter((x) => x.id === undefined)) {
+    let docNo = lineDocNo(base, next);
+    while (await tx.select({ id: s.expEntries.id }).from(s.expEntries).where(eq(s.expEntries.docNo, docNo)).then((r) => r.length)) docNo = lineDocNo(base, ++next);
+    await tx.insert(s.expEntries).values({ ...lineValues(l), docBase: base, lineNo: next, docNo, createdBy: userId } as never);
+    next++;
+  }
+  return base;
+}
+
+export async function requestExpDoc(user: User, action: "create_doc" | "update_doc" | "delete_doc", raw: Record<string, unknown>, base?: string | null): Promise<ChangeResult> {
+  if (user.role !== "admin" && user.role !== "master") return { ok: false, errors: {}, message: "Only Admin or Master can change Exp." };
+  const db = await getDb();
+  let before: Record<string, unknown> | null = null;
+  let existing: Awaited<ReturnType<typeof docLines>> = [];
+  if (action !== "create_doc") {
+    if (!base) return { ok: false, errors: {}, message: "Document not found" };
+    existing = await docLines(db, base);
+    if (!existing.length) return { ok: false, errors: {}, message: "Document not found" };
+    before = { docBase: base, lines: existing };
+  }
+  if (action === "delete_doc") return submit(user, "exp", action, null, { docBase: base, lines: existing } as never, before);
+  const n = await normalizeExpDoc(raw, action === "update_doc" ? base ?? null : null);
+  if (Object.keys(n.errors).length) return { ok: false, errors: n.errors };
+  return submit(user, "exp", action, null, n.data as never, before);
+}
+
 // =================================================================== shared request / approval
 
 async function submit(user: User, entity: "exp" | "emp", action: string, targetId: number | null, data: Record<string, unknown>, before: Record<string, unknown> | null): Promise<ChangeResult> {
@@ -279,6 +431,11 @@ async function submit(user: User, entity: "exp" | "emp", action: string, targetI
 }
 
 function summary(entity: string, action: string, d: Record<string, unknown>) {
+  if (entity === "exp" && Array.isArray(d.lines)) {
+    const ls = d.lines as ExpDocLine[];
+    const net = ls.reduce((a, l) => a + (l.rp === "Receipt" ? 1 : -1) * (Number(l.gross) || 0), 0);
+    return `${ACTION_LABEL[action]} — ${esc(d.docBase ?? "(new number)")} · ${ls.length} lines · net ₹${net}`;
+  }
   if (entity === "exp")
     return `${ACTION_LABEL[action]} — ${esc(d.head)} · ${esc(d.mode)} · ${esc(d.rp)} ₹${esc(d.gross)} · ${esc(d.bkgId ?? "")} ${esc(d.emp)} · ${esc(d.payDate)}`;
   return `${ACTION_LABEL[action]} — ${esc(d.emp)}${d.effectiveFrom ? ` from ${esc(d.effectiveFrom)}` : ""}${d.exitDate ? ` exit on ${esc(d.exitDate)}` : ""}`;

@@ -1,8 +1,9 @@
 // Port of every calculated column in the Excel Bkg table.
 import { codeOf, eq, isoToSerial, N, num, round, str, type Cell } from "./excel";
+import { COMPANY } from "../company";
 import { Hierarchy, overrideAt, type OverrideRule } from "./hierarchy";
 
-export const GST_RATE = 0.12;
+export const GST_RATE = COMPANY.gstRate;
 
 /** One Exp (receipt/payment) row — only the fields Bkg reads. */
 export interface ExpRow {
@@ -28,6 +29,9 @@ export interface CalcContext {
   overrides: OverrideRule[];
   /** All BkgIDs in the table (for the OA "unlinked money" rule). */
   allBkgIds: string[];
+  /** Exp rows grouped by lower-case BkgID, and the set of valid ids (built once by computeAll for speed). */
+  expByBkg?: Map<string, ExpRow[]>;
+  validIds?: Set<string>;
 }
 
 /** Input columns, keyed exactly as the Excel Bkg headers. */
@@ -65,7 +69,9 @@ const EXCLUDED_STATUSES = ["OA", "Cancel", "IC Bkg"];
 export function computeBooking(input: BookingInput, ctx: CalcContext): BookingRow {
   const r: BookingRow = { ...input };
   const H = ctx.hierarchy;
-  const id = str(input.BkgID);
+  // TRPL's "OA" (on-account) rows have no booking id in Excel; here they are stored as OA-001... and treated as id-less.
+  const rawId = str(input.BkgID);
+  const id = /^OA-d+$/i.test(rawId) && eq(input.FormStatus, "OA") ? "" : rawId;
   const project = str(input.Project);
   const status = str(input.FormStatus);
   const bkgMonth = isoToSerial(input.BkgMonth);
@@ -78,10 +84,14 @@ export function computeBooking(input: BookingInput, ctx: CalcContext): BookingRo
   const netBsp =
     v("BSPPSF") - v("InaugralDiscountPSF") - v("NPVDiscountPSF") - v("SchemeDiscountPSF") -
     v("FormRevisedPSF") - v("AgreementRevisedPSF") - v("PaymentPlanDiscountPSF") - v("OnFormDiscountPSF");
-  const totalCharges = v("PLCPSF") + v("IFMSPSF") + v("PowerBackupPSF") + v("SinkingFundClubPSF") + v("OtherChargesPSF");
+  // A numeric TotalChargesPSF / GST in the input is a manual override (TRPL has some); otherwise they are calculated.
+  const totalCharges =
+    typeof input.TotalChargesPSF === "number"
+      ? input.TotalChargesPSF
+      : v("PLCPSF") + v("IFMSPSF") + v("PowerBackupPSF") + v("SinkingFundClubPSF") + v("OtherChargesPSF");
   const tcPsf = netBsp + totalCharges;
   const tcAmt = Area * tcPsf;
-  const gst = tcAmt * GST_RATE;
+  const gst = typeof input.GST === "number" ? input.GST : tcAmt * GST_RATE;
   Object.assign(r, {
     NetBSPPSF: netBsp,
     TotalChargesPSF: totalCharges,
@@ -103,11 +113,12 @@ export function computeBooking(input: BookingInput, ctx: CalcContext): BookingRo
   // ---- money from Exp
   const exp = ctx.exp;
   const isOA = eq(status, "OA");
-  const valid = new Set(ctx.allBkgIds.filter((x) => x !== "").map((x) => x.toLowerCase()));
+  const valid = ctx.validIds ?? new Set(ctx.allBkgIds.filter((x) => x !== "").map((x) => x.toLowerCase()));
+  const mine: ExpRow[] = id === "" ? [] : ctx.expByBkg ? (ctx.expByBkg.get(id.toLowerCase()) ?? []) : exp.filter((e) => eq(e.bkgId, id));
   const sumHeads = (heads: string[], modeFilter: (e: ExpRow) => boolean) => {
     let amt = 0;
     if (id !== "") {
-      for (const e of exp) if (eq(e.bkgId, id) && heads.some((h) => eq(e.head, h)) && modeFilter(e)) amt += signed(e);
+      for (const e of mine) if (heads.some((h) => eq(e.head, h)) && modeFilter(e)) amt += signed(e);
     } else if (isOA) {
       for (const e of exp)
         if (eq(e.project, project) && heads.some((h) => eq(e.head, h)) && modeFilter(e) && !valid.has(str(e.bkgId).toLowerCase()))
@@ -119,17 +130,20 @@ export function computeBooking(input: BookingInput, ctx: CalcContext): BookingRo
   const any = () => true;
   const spd = sumHeads(["Recd From Client", "Form Revised"], notChq);
   let chq = 0;
-  if (id !== "") for (const e of exp) if (eq(e.bkgId, id) && eq(e.mode, "Chq") && eq(e.head, "Recd From Client")) chq += signed(e);
+  for (const e of mine) if (eq(e.mode, "Chq") && eq(e.head, "Recd From Client")) chq += signed(e);
+  chq = round(chq, 0); // Excel rounds the booking's cheque total
   const totalRecd = spd + chq;
   const brokerageBy = (f: (e: ExpRow) => boolean, val: (e: ExpRow) => number = signed) => {
     let s = 0;
-    for (const e of exp) if (eq(e.bkgId, id) && eq(e.project, project) && f(e)) s += val(e);
+    // a booking without an id matches Exp rows that also have no id (same project)
+    for (const e of id === "" ? exp : mine) if (eq(e.bkgId, id) && eq(e.project, project) && f(e)) s += val(e);
     return s;
   };
   const isBrk = (e: ExpRow) => eq(e.head, "Brokerage Recd");
-  const commRecd = brokerageBy((e) => isBrk(e) && !eq(e.mode, "Billing") && !eq(e.mode, "NOC"));
+  // CommRecd / CommBilled find nothing for a booking with no id (the unlinked OA rows); the Bill* columns still match by project
+  const commRecd = id === "" ? 0 : brokerageBy((e) => isBrk(e) && !eq(e.mode, "Billing") && !eq(e.mode, "NOC"));
   const recdNoc = brokerageBy((e) => isBrk(e) && eq(e.mode, "NOC"));
-  const commBilled = brokerageBy((e) => isBrk(e) && eq(e.mode, "Billing"));
+  const commBilled = id === "" ? 0 : brokerageBy((e) => isBrk(e) && eq(e.mode, "Billing"));
   const billGstTds = brokerageBy((e) => isBrk(e) && eq(e.mode, "Billing"), netBill);
   const recdAgtBill = brokerageBy((e) => eq(e.head, "Billed and Recd"), netBill);
   const formRevised = sumHeads(["Form Revised"], any);
@@ -249,6 +263,16 @@ export function computeBooking(input: BookingInput, ctx: CalcContext): BookingRo
 }
 
 export function computeAll(inputs: BookingInput[], ctx: Omit<CalcContext, "allBkgIds">): BookingRow[] {
-  const full: CalcContext = { ...ctx, allBkgIds: inputs.map((i) => str(i.BkgID)) };
+  const allBkgIds = inputs.map((i) => str(i.BkgID));
+  const expByBkg = new Map<string, ExpRow[]>();
+  for (const e of ctx.exp) {
+    const k = str(e.bkgId).toLowerCase();
+    if (k === "") continue;
+    const l = expByBkg.get(k);
+    if (l) l.push(e);
+    else expByBkg.set(k, [e]);
+  }
+  const validIds = new Set(allBkgIds.filter((x) => x !== "").map((x) => x.toLowerCase()));
+  const full: CalcContext = { ...ctx, allBkgIds, expByBkg, validIds };
   return inputs.map((i) => computeBooking(i, full));
 }

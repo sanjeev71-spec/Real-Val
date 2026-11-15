@@ -9,6 +9,7 @@ import { normalize, validateBooking, type Errors } from "./validate";
 import { NEW_BOOKING_DEFAULTS } from "./fields";
 import type { User } from "./auth";
 import { str } from "./calc/excel";
+import { COMPANY } from "./company";
 
 export const NUDGE_HOURS = 4;
 const SUPERIOR_LINK_DAYS = 7;
@@ -33,13 +34,14 @@ async function log(tx: Tx | DB, submissionId: number, actor: User | string, acti
   });
 }
 
-/** Next BkgID: RV + 4 digits, one more than the highest existing. Call inside a transaction holding the lock. */
+/** Next BkgID: company prefix + digits, one more than the highest existing. Call inside a transaction holding the lock. */
 async function nextBkgIds(tx: Tx, count: number): Promise<string[]> {
+  const p = COMPANY.idPrefix;
   const [r] = await tx.execute<{ n: number | null }>(
-    sql`select max((substring(bkg_id from 3))::int) as n from bookings where bkg_id ~ '^RV[0-9]+$'`,
+    sql`select max((substring(bkg_id from ${p.length + 1}::int))::int) as n from bookings where bkg_id ~ ${`^${p}[0-9]+$`}`,
   ).then((x) => ("rows" in x ? x.rows : x) as { n: number | null }[]);
   const start = (r?.n ?? 0) + 1;
-  return Array.from({ length: count }, (_, i) => `RV${String(start + i).padStart(4, "0")}`);
+  return Array.from({ length: count }, (_, i) => `${p}${String(start + i).padStart(COMPANY.idDigits, "0")}`);
 }
 
 /** Inserts bookings, generating BkgIDs for rows without one. Returns the IDs in order. */
@@ -82,8 +84,8 @@ async function notifyApprovers(id: number, status: string, d: FormData, intro: s
   const to = await approverEmails(status);
   await sendMail({
     to,
-    subject: `[Approval needed] SCD #${id} — ${d.Client ?? ""} / ${d.Project ?? ""} ${d.UnitNo ?? ""}`,
-    html: `<p>${esc(intro)}</p>${summary(d)}<p><a href="${appUrl(`/submissions/${id}`)}">Open SCD #${id} to review</a></p>`,
+    subject: `[Approval needed] ${COMPANY.form} #${id} — ${d.Client ?? ""} / ${d.Project ?? ""} ${d.UnitNo ?? ""}`,
+    html: `<p>${esc(intro)}</p>${summary(d)}<p><a href="${appUrl(`/submissions/${id}`)}">Open ${COMPANY.form} #${id} to review</a></p>`,
   });
 }
 
@@ -105,7 +107,7 @@ export async function submitScd(raw: Record<string, unknown>, user: User): Promi
   const status = user.role === "admin" ? "pending_master" : "pending_admin";
   const [sub] = await db.insert(s.submissions).values({ data, status, submittedBy: user.id }).returning();
   await log(db, sub.id, user, "submitted");
-  await notifyApprovers(sub.id, status, data, `${user.name} submitted a new SCD.`);
+  await notifyApprovers(sub.id, status, data, `${user.name} submitted a new ${COMPANY.form}.`);
   return { ok: true, id: sub.id };
 }
 
@@ -113,13 +115,13 @@ export async function submitScd(raw: Record<string, unknown>, user: User): Promi
 export async function resubmitScd(id: number, raw: Record<string, unknown>, user: User): Promise<Result> {
   const db = await getDb();
   const [sub] = await db.select().from(s.submissions).where(eq(s.submissions.id, id));
-  if (!sub || sub.submittedBy !== user.id || sub.status !== "returned") return { ok: false, errors: {}, message: "This SCD cannot be resubmitted." };
+  if (!sub || sub.submittedBy !== user.id || sub.status !== "returned") return { ok: false, errors: {}, message: `This ${COMPANY.form} cannot be resubmitted.` };
   const { data, errors } = await prepareScd(raw, user, id);
   if (Object.keys(errors).length) return { ok: false, errors };
   const status = user.role === "admin" ? "pending_master" : "pending_admin";
   await db.update(s.submissions).set({ data, status, updatedAt: new Date() }).where(eq(s.submissions.id, id));
   await log(db, id, user, "resubmitted");
-  await notifyApprovers(id, status, data, `${user.name} resubmitted SCD #${id} after changes.`);
+  await notifyApprovers(id, status, data, `${user.name} resubmitted ${COMPANY.form} #${id} after changes.`);
   return { ok: true, id };
 }
 
@@ -128,7 +130,7 @@ export async function editPending(id: number, raw: Record<string, unknown>, user
   const db = await getDb();
   const [sub] = await db.select().from(s.submissions).where(eq(s.submissions.id, id));
   const canEdit = sub && ((user.role === "admin" && sub.status === "pending_admin") || (user.role === "master" && ["pending_admin", "pending_master"].includes(sub.status)));
-  if (!canEdit) return { ok: false, errors: {}, message: "You cannot edit this SCD now." };
+  if (!canEdit) return { ok: false, errors: {}, message: `You cannot edit this ${COMPANY.form} now.` };
   const { data, errors } = await prepareScd(raw, user, id);
   if (Object.keys(errors).length) return { ok: false, errors };
   await db.update(s.submissions).set({ data, updatedAt: new Date() }).where(eq(s.submissions.id, id));
@@ -144,7 +146,7 @@ export async function decide(id: number, decision: Decision, comment: string, us
   if (!sub) return { ok: false, errors: {}, message: "Not found" };
   const asAdmin = user.role === "admin" && sub.status === "pending_admin";
   const asMaster = user.role === "master" && ["pending_admin", "pending_master"].includes(sub.status);
-  if (!asAdmin && !asMaster) return { ok: false, errors: {}, message: "This SCD is not waiting for you." };
+  if (!asAdmin && !asMaster) return { ok: false, errors: {}, message: `This ${COMPANY.form} is not waiting for you.` };
   if (decision !== "approve" && !comment.trim()) return { ok: false, errors: { comment: "Add a comment explaining why" } };
   const [submitter] = await db.select().from(s.users).where(eq(s.users.id, sub.submittedBy));
   const data = sub.data as FormData;
@@ -155,9 +157,9 @@ export async function decide(id: number, decision: Decision, comment: string, us
     await log(db, id, user, decision === "return" ? "sent_back" : "rejected", comment);
     await sendMail({
       to: submitter?.email ?? [],
-      subject: `SCD #${id} ${decision === "return" ? "sent back for changes" : "rejected"}`,
-      html: `<p>${esc(user.name)} ${decision === "return" ? "sent your SCD back for changes" : "rejected your SCD"}.</p>
-        <p><b>Comment:</b> ${esc(comment)}</p>${summary(data)}<p><a href="${appUrl(`/submissions/${id}`)}">Open SCD #${id}</a></p>`,
+      subject: `${COMPANY.form} #${id} ${decision === "return" ? "sent back for changes" : "rejected"}`,
+      html: `<p>${esc(user.name)} ${decision === "return" ? `sent your ${COMPANY.form} back for changes` : `rejected your ${COMPANY.form}`}.</p>
+        <p><b>Comment:</b> ${esc(comment)}</p>${summary(data)}<p><a href="${appUrl(`/submissions/${id}`)}">Open ${COMPANY.form} #${id}</a></p>`,
     });
     return { ok: true, id };
   }
@@ -165,7 +167,7 @@ export async function decide(id: number, decision: Decision, comment: string, us
   if (asAdmin) {
     await db.update(s.submissions).set({ status: "pending_master", updatedAt: new Date() }).where(eq(s.submissions.id, id));
     await log(db, id, user, "admin_approved", comment);
-    await notifyApprovers(id, "pending_master", data, `${user.name} (Admin) approved SCD #${id}; it now needs your validation.`);
+    await notifyApprovers(id, "pending_master", data, `${user.name} (Admin) approved ${COMPANY.form} #${id}; it now needs your validation.`);
     return { ok: true, id };
   }
 
@@ -186,8 +188,8 @@ export async function decide(id: number, decision: Decision, comment: string, us
   await sendMail({
     to: submitter?.email ?? [],
     cc: admins,
-    subject: `SCD #${id} approved — booking ${bkgId} created`,
-    html: `<p>Your SCD was validated and added to Bkg as <b>${bkgId}</b>.</p>${summary(fresh)}<p><a href="${appUrl(`/bookings/${bkgId}`)}">Open booking ${bkgId}</a></p>`,
+    subject: `${COMPANY.form} #${id} approved — booking ${bkgId} created`,
+    html: `<p>Your ${COMPANY.form} was validated and added to Bkg as <b>${bkgId}</b>.</p>${summary(fresh)}<p><a href="${appUrl(`/bookings/${bkgId}`)}">Open booking ${bkgId}</a></p>`,
   });
   return { ok: true, id, bkgId };
 }
@@ -204,12 +206,12 @@ export async function nudge(id: number, user: User): Promise<Result> {
   const db = await getDb();
   const [sub] = await db.select().from(s.submissions).where(eq(s.submissions.id, id));
   if (!sub || !["pending_admin", "pending_master"].includes(sub.status)) return { ok: false, errors: {}, message: "Nothing to nudge." };
-  if (sub.submittedBy !== user.id && user.role === "sales") return { ok: false, errors: {}, message: "Not your SCD." };
+  if (sub.submittedBy !== user.id && user.role === "sales") return { ok: false, errors: {}, message: `Not your ${COMPANY.form}.` };
   if (sub.lastNudgeAt && Date.now() - sub.lastNudgeAt.getTime() < NUDGE_HOURS * 3600_000)
     return { ok: false, errors: {}, message: `Already nudged — you can nudge again after ${NUDGE_HOURS} hours.` };
   await db.update(s.submissions).set({ lastNudgeAt: new Date() }).where(eq(s.submissions.id, id));
   await log(db, id, user, "nudged");
-  await notifyApprovers(id, sub.status, sub.data as FormData, `Reminder from ${user.name}: SCD #${id} is still waiting for approval.`);
+  await notifyApprovers(id, sub.status, sub.data as FormData, `Reminder from ${user.name}: ${COMPANY.form} #${id} is still waiting for approval.`);
   return { ok: true, id };
 }
 
@@ -220,7 +222,7 @@ export async function requestSuperior(id: number, superiorEmail: string, note: s
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { ok: false, errors: { superiorEmail: "Invalid email" } };
   const db = await getDb();
   const [sub] = await db.select().from(s.submissions).where(eq(s.submissions.id, id));
-  if (!sub || !["pending_admin", "pending_master"].includes(sub.status)) return { ok: false, errors: {}, message: "SCD is not pending." };
+  if (!sub || !["pending_admin", "pending_master"].includes(sub.status)) return { ok: false, errors: {}, message: `${COMPANY.form} is not pending.` };
   const token = randomBytes(32).toString("base64url");
   await db.update(s.submissions).set({
     superiorEmail: email,
@@ -233,7 +235,7 @@ export async function requestSuperior(id: number, superiorEmail: string, note: s
     to: email,
     cc: user.email,
     replyTo: user.email,
-    subject: `Approval requested by ${user.name}: SCD #${id} — ${(sub.data as FormData).Client ?? ""}`,
+    subject: `Approval requested by ${user.name}: ${COMPANY.form} #${id} — ${(sub.data as FormData).Client ?? ""}`,
     html: `<p>${esc(user.name)} has asked for your approval on this booking.</p>${note ? `<p><b>Note:</b> ${esc(note)}</p>` : ""}
       ${summary(sub.data as FormData)}<p><a href="${appUrl(`/superior/${token}`)}">Review and approve / reject</a> (link valid ${SUPERIOR_LINK_DAYS} days, single use)</p>`,
   });
@@ -264,9 +266,9 @@ export async function superiorDecide(token: string, decision: "approved" | "reje
   await log(db, sub.id, `Superior (${sub.superiorEmail})`, decision === "approved" ? "superior_approved" : "superior_rejected", comment);
   await sendMail({
     to: (await usersByRole("master")).map((u) => u.email),
-    subject: `Superior ${decision} SCD #${sub.id}`,
-    html: `<p>${esc(sub.superiorEmail)} <b>${decision}</b> SCD #${sub.id}.</p>${comment ? `<p><b>Comment:</b> ${esc(comment)}</p>` : ""}
-      <p><a href="${appUrl(`/submissions/${sub.id}`)}">Open SCD #${sub.id}</a> to validate.</p>`,
+    subject: `Superior ${decision} ${COMPANY.form} #${sub.id}`,
+    html: `<p>${esc(sub.superiorEmail)} <b>${decision}</b> ${COMPANY.form} #${sub.id}.</p>${comment ? `<p><b>Comment:</b> ${esc(comment)}</p>` : ""}
+      <p><a href="${appUrl(`/submissions/${sub.id}`)}">Open ${COMPANY.form} #${sub.id}</a> to validate.</p>`,
   });
   return { ok: true, id: sub.id };
 }

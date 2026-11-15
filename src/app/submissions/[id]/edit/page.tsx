@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { getDb, schema as s } from "@/lib/db";
 import { loadMasters } from "@/lib/data";
 import { ScdForm } from "@/components/ScdForm";
+import { COMPANY } from "../../../../lib/company";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,7 @@ export default async function EditSubmission({ params }: { params: Promise<{ id:
   const masters = await loadMasters(id);
   return (
     <div className="space-y-4">
-      <h1 className="h1">{resubmit ? `Edit & resubmit SCD #${id}` : `Edit SCD #${id}`}</h1>
+      <h1 className="h1">{resubmit ? `Edit & resubmit ${COMPANY.form} #${id}` : `Edit ${COMPANY.form} #${id}`}</h1>
       <ScdForm masters={masters} initial={sub.data} role={user.role} mode={{ kind: "edit", id, resubmit }} />
     </div>
   );

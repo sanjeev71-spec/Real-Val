@@ -2,6 +2,7 @@ import { superiorLookup } from "@/lib/workflow";
 import { previewBooking } from "@/lib/data";
 import { BookingView } from "@/components/BookingView";
 import { SuperiorDecision } from "@/components/SuperiorDecision";
+import { COMPANY } from "../../../lib/company";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,7 @@ export default async function SuperiorPage({ params }: { params: Promise<{ token
   const row = await previewBooking(sub.data);
   return (
     <div className="space-y-4">
-      <h1 className="h1">Approval requested — SCD #{sub.id}</h1>
+      <h1 className="h1">Approval requested — {COMPANY.form} #{sub.id}</h1>
       <SuperiorDecision token={token} />
       <BookingView row={row} />
     </div>

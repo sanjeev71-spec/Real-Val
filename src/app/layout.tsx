@@ -3,21 +3,25 @@ import Link from "next/link";
 import "./globals.css";
 import { currentUser } from "@/lib/auth";
 import { signOutAction } from "./actions";
+import { COMPANY } from "../lib/company";
 
-export const metadata: Metadata = { title: "Realty Vault — Bookings", description: "SCD entry, approvals and Bkg" };
+export const metadata: Metadata = { title: `${COMPANY.name} — Bookings`, description: `${COMPANY.form} entry, approvals and Bkg` };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await currentUser();
   const links: [string, string, boolean][] = user
     ? [
         ["/", "Home", true],
-        ["/scd/new", "New SCD", user.role !== "hr"],
-        ["/submissions", "SCD Approval", user.role !== "hr"],
+        ["/dashboard", "Dashboard", user.role === "master" || user.role === "admin"],
+        ["/scd/new", `New ${COMPANY.form}`, user.role !== "hr"],
+        ["/submissions", `${COMPANY.form} Approval`, user.role !== "hr"],
         ["/bookings", "Bkg", user.role !== "hr"],
         ["/exp", "Exp", user.role === "admin" || user.role === "master"],
         ["/emp", "Emp", user.role === "hr" || user.role === "master"],
         ["/changes", "Exp/Emp approvals", user.role !== "sales"],
         ["/reports/demand", "Demand", user.role !== "hr"],
+        ["/reports/pnl", "P&L", user.role === "master"],
+        ["/reports/projection", "Projection", user.role === "master" || user.role === "admin"],
         ["/reports/org", "Org", user.role !== "sales"],
         ["/bulk", "Bulk upload", user.role === "master"],
         ["/admin/masters", "Masters", user.role === "master"],
@@ -29,7 +33,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="min-h-screen">
         <header className="border-b border-[var(--line)] bg-white">
           <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
-            <Link href="/" className="font-semibold text-[var(--brand)]">Realty Vault</Link>
+            <Link href="/" className="font-semibold text-[var(--brand)]">{COMPANY.name}</Link>
             <nav className="flex flex-wrap gap-4 text-sm">
               {links.filter((l) => l[2]).map(([href, label]) => (
                 <Link key={href} href={href} className="text-slate-700 hover:text-[var(--brand)]">{label}</Link>

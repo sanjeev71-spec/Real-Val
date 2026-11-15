@@ -6,6 +6,7 @@ import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
 import { getDb, schema as s } from "./db";
 import { sendMail } from "./mail";
+import { COMPANY } from "./company";
 
 const COOKIE = "rv_session";
 const SESSION_HOURS = 12;
@@ -46,7 +47,7 @@ export async function requestOtp(emailRaw: string): Promise<void> {
   });
   await sendMail({
     to: email,
-    subject: `Your Realty Vault sign-in code: ${code}`,
+    subject: `Your ${COMPANY.name} sign-in code: ${code}`,
     html: `<p>Hello ${user.name},</p><p>Your sign-in code is <b style="font-size:20px;letter-spacing:3px">${code}</b>.</p>
       <p>It expires in ${OTP_MINUTES} minutes. If you did not try to sign in, ignore this email.</p>`,
   });

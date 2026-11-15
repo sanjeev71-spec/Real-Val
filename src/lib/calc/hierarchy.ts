@@ -2,6 +2,7 @@
 // (EmpRowAt, ChainUp, EmpLastTo, Bridge1, RHAt, RevShareAt, ExpShareAt,
 //  DirectorAt, DirectorNameAt, ShareCodeAt, OverrideAt).
 import { codeOf, eq, str, type Cell } from "./excel";
+import { COMPANY } from "../company";
 
 export interface EmpRow {
   emp: string; // "Name~Code"
@@ -25,7 +26,7 @@ export interface OverrideRule {
   targetDownline: string | null;
 }
 
-export const DEFAULT_DIRECTOR_CODE = "200001";
+export const DEFAULT_DIRECTOR_CODE = COMPANY.topCode;
 
 export class Hierarchy {
   private byCode = new Map<string, number[]>(); // code -> row indexes (table order)
@@ -109,7 +110,7 @@ export class Hierarchy {
     return typeof v === "number" ? v : 0;
   }
 
-  /** DirectorAt: picks the person just below the top of the chain if they carry RevShare, else 200001. */
+  /** DirectorAt: picks the person just below the top of the chain if they carry RevShare, else the top code. */
   directorAt(code: string, d: number): string {
     const chain: string[] = [code];
     for (let k = 0; k < 7; k++) chain.push(this.rhAt(chain[chain.length - 1], d));

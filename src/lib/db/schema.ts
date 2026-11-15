@@ -69,11 +69,20 @@ export const employees = pgTable("employees", {
   bankName: text("bank_name"),
   bankAccount: text("bank_account"),
   ifsc: text("ifsc"),
+  // derived on every Emp change (and daily for open periods) - replaces the Excel EmpChainMap / Emp formulas
+  director: text("director"), // Director as of the period start, "Name~Code"
+  chainPath: text("chain_path"), // reporting-head codes upwards from the period start, e.g. TV0015>TV0022
+  daysWorked: integer("days_worked"),
+  manMonths: doublePrecision("man_months"),
+  seatCost: doublePrecision("seat_cost"),
+  derivedOn: date("derived_on"),
 }, (t) => [index("emp_emp_idx").on(t.emp)]);
 
 export const expEntries = pgTable("exp_entries", {
   id: serial("id").primaryKey(),
-  docNo: text("doc_no"),
+  docNo: text("doc_no"), // line number of the document, e.g. NOC-0419-07
+  docBase: text("doc_base"), // the document: NOC-0419 (= docNo for a one-line document)
+  lineNo: integer("line_no"),
   payDate: date("pay_date"),
   valueDate: date("value_date"),
   head: text("head"),
@@ -88,10 +97,17 @@ export const expEntries = pgTable("exp_entries", {
   narration: text("narration"),
   remarks: text("remarks"),
   emp: text("emp"), // "Name~Code"; defaults from the booking, can be changed
+  relatedEmpName: text("related_emp_name"),
+  // cheque / UTR details (used when Mode = Chq)
+  purpose: text("purpose"),
+  paymentMode: text("payment_mode"),
+  instrNo: text("instr_no"),
+  instrDate: date("instr_date"),
+  chqBank: text("bank_name"),
   createdBy: integer("created_by"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-}, (t) => [index("exp_bkg_idx").on(t.bkgId), uniqueIndex("exp_docno_idx").on(t.docNo)]);
+}, (t) => [index("exp_bkg_idx").on(t.bkgId), uniqueIndex("exp_docno_idx").on(t.docNo), index("exp_docbase_idx").on(t.docBase)]);
 
 /** Mode master — the dropdown for Exp Mode. */
 export const modes = pgTable("modes", {
@@ -216,6 +232,18 @@ export const auditLog = pgTable("audit_log", {
   detail: jsonb("detail"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Yearly targets per employee; spread equally over the months by the Projection report. */
+export const projections = pgTable("projections", {
+  id: serial("id").primaryKey(),
+  year: integer("year").notNull(),
+  seq: integer("seq").notNull().default(0),
+  empCode: text("emp_code").notNull(),
+  manMonths: doublePrecision("man_months"),
+  bkgCount: doublePrecision("bkg_count"),
+  directorRevenue: doublePrecision("director_revenue"),
+  remarks: text("remarks"),
+}, (t) => [index("proj_year_idx").on(t.year)]);
 
 export const settings = pgTable("settings", {
   key: text("key").primaryKey(),

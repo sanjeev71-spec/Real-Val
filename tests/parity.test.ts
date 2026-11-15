@@ -12,7 +12,7 @@ const load = (n: string) => JSON.parse(readFileSync(join(__dirname, "..", "data"
 // data/ holds real client data and is not in git, so this test only runs where it has been exported.
 const hasData = existsSync(join(__dirname, "..", "data", "excel", "Bkg.json"));
 
-describe.skipIf(!hasData)("Bkg calculations match Excel", () => {
+describe.skipIf(!hasData || process.env.NEXT_PUBLIC_COMPANY === "trpl")("Bkg calculations match Excel", () => {
   const bkg: Record<string, unknown>[] = load("Bkg");
   const inputs = bkg.map((row) => Object.fromEntries(BKG_INPUT_KEYS.map((k) => [k, row[k] as never])));
   const out = computeAll(inputs, {

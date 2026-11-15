@@ -7,6 +7,7 @@ import { applyLookups, demandSchedule, employeeNames, priceListFor, type FormDat
 import { FORM_STATUSES, PROPERTY_TYPES, SOURCES_OF_LEAD } from "@/lib/fields";
 import { fmtDate, fmtNum } from "@/lib/format";
 import { saveScdAction, submitScdAction } from "@/app/actions";
+import { COMPANY } from "../lib/company";
 
 type Mode = { kind: "new" } | { kind: "edit"; id: number; resubmit: boolean };
 
@@ -180,7 +181,7 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
             {out("TotalChargesPSF", calc.TotalChargesPSF)}
             {out("TotalCostPSF", calc.TotalCostPSF, true)}
             {out("TotalCostAmt", calc.TotalCostAmt)}
-            {out("GST (12%)", calc.GST)}
+            {COMPANY.gstManual ? num("GST", "GST (Rs) - only if charged") : out(`GST (${Math.round(COMPANY.gstRate * 100)}%)`, calc.GST)}
             {out("TCWithGST", calc.TCWithGST, true)}
           </div>
           <div className="space-y-3">
@@ -271,7 +272,7 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
       <section className="card space-y-3">
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" className="mt-1" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
-          <span>I undertake that the details mentioned above are true and I am solely responsible for all the details filled and commitments given to the Client(s). Realty Vault Pvt. Ltd. is not responsible for any of my actions/commitments to the Client(s).</span>
+          <span>I undertake that the details mentioned above are true and I am solely responsible for all the details filled and commitments given to the Client(s). {COMPANY.legalName} is not responsible for any of my actions/commitments to the Client(s).</span>
         </label>
         <button className="btn btn-primary" onClick={submit} disabled={pending}>
           {pending ? "Saving…" : mode.kind === "new" ? (role === "master" ? "Save to Bkg" : "Submit for approval") : mode.resubmit ? "Resubmit for approval" : "Save changes"}

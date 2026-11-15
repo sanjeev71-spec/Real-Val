@@ -24,7 +24,7 @@ const MAP: [string, string][] = [
   ["3rd Demand Amt (30%)", "ThirdDemandAmt"], ["3rd Net Demand", "ThirdNetDemand"], ["Total Net Demand Outstanding", "TotalOutstanding"],
 ];
 
-describe.skipIf(!hasData)("Demand report matches Excel DemandAll", () => {
+describe.skipIf(!hasData || process.env.NEXT_PUBLIC_COMPANY === "trpl")("Demand report matches Excel DemandAll", () => {
   it("every numeric and text column", () => {
     const bkg: Record<string, unknown>[] = load("Bkg");
     const inputs = bkg.map((row) => Object.fromEntries(BKG_INPUT_KEYS.map((k) => [k, row[k] as never])));

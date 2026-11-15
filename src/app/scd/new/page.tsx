@@ -2,6 +2,7 @@ import { requireUser } from "@/lib/auth";
 import { loadMasters } from "@/lib/data";
 import { NEW_BOOKING_DEFAULTS } from "@/lib/fields";
 import { ScdForm } from "@/components/ScdForm";
+import { COMPANY } from "../../../lib/company";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export default async function NewScd() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="h1">Sale Confirmation Dossier (SCD)</h1>
+        <h1 className="h1">{COMPANY.formLong} ({COMPANY.form})</h1>
         <p className="text-sm text-[var(--muted)]">
           {user.role === "sales" && "After you submit, an Admin approves it and then the Master validates it before it is added to Bkg."}
           {user.role === "admin" && "After you submit, the Master validates it before it is added to Bkg."}

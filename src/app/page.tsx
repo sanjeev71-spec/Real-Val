@@ -5,6 +5,7 @@ import { getDb, schema as s } from "@/lib/db";
 import { fmtDate } from "@/lib/format";
 import { StatusPill } from "@/components/StatusPill";
 import { describeChange } from "@/lib/changeView";
+import { COMPANY } from "../lib/company";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,7 @@ export default async function Home() {
         <div className="ml-auto flex gap-2">
           {(user.role === "admin" || user.role === "master") && <Link href="/exp/new" className="btn">+ Exp entry</Link>}
           {(isHr || user.role === "master") && <Link href="/emp/new" className="btn">+ Employee</Link>}
-          {!isHr && <Link href="/scd/new" className="btn btn-primary">+ New SCD</Link>}
+          {!isHr && <Link href="/scd/new" className="btn btn-primary">+ New {COMPANY.form}</Link>}
         </div>
       </div>
 
@@ -61,7 +62,7 @@ export default async function Home() {
 
       {returned.length > 0 && (
         <div className="card border-amber-300 bg-amber-50">
-          <b>{returned.length} SCD(s) were sent back to you for changes.</b>{" "}
+          <b>{returned.length} {COMPANY.form}(s) were sent back to you for changes.</b>{" "}
           {returned.map((r) => <Link key={r.id} className="ml-2 underline" href={`/submissions/${r.id}`}>#{r.id}</Link>)}
         </div>
       )}
@@ -75,7 +76,7 @@ export default async function Home() {
 
       {!isHr && (
         <section className="card">
-          <h2 className="h2">My recent SCDs</h2>
+          <h2 className="h2">My recent {COMPANY.form}s</h2>
           <List rows={mine} showAll />
         </section>
       )}

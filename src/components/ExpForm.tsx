@@ -3,6 +3,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { expRequestAction } from "@/app/actions";
 import { fmtNum } from "@/lib/format";
+import { COMPANY } from "../lib/company";
 
 export interface ExpFormProps {
   role: string;
@@ -11,6 +12,7 @@ export interface ExpFormProps {
   employees: string[];
   projects: string[];
   bookings: { id: string; client: string; emp: string; project: string }[];
+  chqLists?: { purposes: string[]; paymentModes: string[]; banks: string[] };
   initial?: Record<string, string | number | null>;
   targetId?: number;
 }
@@ -23,6 +25,7 @@ export function ExpForm(p: ExpFormProps) {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
   const isMaster = p.role === "master";
+  const isChq = String(d.mode ?? "").toLowerCase() === "chq";
 
   const booking = useMemo(() => p.bookings.find((b) => b.id.toUpperCase() === String(d.bkgId ?? "").toUpperCase()), [d.bkgId, p.bookings]);
   const type = p.heads.find((h) => h.head === d.head)?.type ?? "";
@@ -93,11 +96,34 @@ export function ExpForm(p: ExpFormProps) {
         </div>
       </section>
 
+      {isChq && (
+        <section className="card">
+          <h2 className="h2">Cheque / UTR details</h2>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <Field errors={errors} k="purpose" label="Purpose" req>
+              {input("purpose", "text", { list: "chq-purposes", placeholder: "Booking Amt, Part, ..." })}
+              <datalist id="chq-purposes">{(p.chqLists?.purposes ?? []).map((x) => <option key={x} value={x} />)}</datalist>
+            </Field>
+            <Field errors={errors} k="paymentMode" label="PaymentMode" req>
+              {input("paymentMode", "text", { list: "chq-paymodes", placeholder: "Cheque, RTGS, UPI, ..." })}
+              <datalist id="chq-paymodes">{(p.chqLists?.paymentModes ?? []).map((x) => <option key={x} value={x} />)}</datalist>
+            </Field>
+            <Field errors={errors} k="chqBank" label="Bank Name">
+              {input("chqBank", "text", { list: "chq-banks" })}
+              <datalist id="chq-banks">{(p.chqLists?.banks ?? []).map((x) => <option key={x} value={x} />)}</datalist>
+            </Field>
+            <Field errors={errors} k="instrNo" label="Chq / UTR No" req>{input("instrNo")}</Field>
+            <Field errors={errors} k="instrDate" label="Chq / UTR Date" req>{input("instrDate", "date")}</Field>
+          </div>
+          <p className="mt-2 text-xs text-[var(--muted)]">Document number is generated as Chq-nnnnn. A cheque that bounced or was refunded is entered as a Payment.</p>
+        </section>
+      )}
+
       <section className="card">
         <h2 className="h2">Booking / employee</h2>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <Field errors={errors} k="bkgId" label="BkgID (optional)">
-            <input id="bkgId" className="input" list="bkg-list" value={String(d.bkgId ?? "")} onChange={(e) => set("bkgId", e.target.value || null)} placeholder="RV0001" />
+            <input id="bkgId" className="input" list="bkg-list" value={String(d.bkgId ?? "")} onChange={(e) => set("bkgId", e.target.value || null)} placeholder={COMPANY.idExample} />
             <datalist id="bkg-list">{p.bookings.map((b) => <option key={b.id} value={b.id}>{b.client} · {b.project}</option>)}</datalist>
           </Field>
           <div>
