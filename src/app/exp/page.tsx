@@ -29,13 +29,13 @@ export default async function ExpList({ searchParams }: { searchParams: Promise<
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="h1">Exp</h1>
-        <span className="text-sm text-[var(--muted)]">{matched.length.toLocaleString("en-IN")} of {all.length.toLocaleString("en-IN")} lines · newest first</span>
+        <span className="text-sm text-[var(--muted)]">{matched.length.toLocaleString("en-IN")} of {all.length.toLocaleString("en-IN")} lines · latest pay date first</span>
         <a className="btn ml-auto" href={exportHref}>Download Excel{filtered ? " (this search)" : ""}</a>
         <Link className="btn btn-primary" href="/exp/new">+ New document</Link>
       </div>
 
-      <form method="get" className="card space-y-3 py-3">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
+      <form method="get" className="card py-3">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
           <div>
             <label className="label" htmlFor="f-head">Head</label>
             <select id="f-head" name="head" className="input" defaultValue={q.head ?? ""}>
@@ -72,11 +72,11 @@ export default async function ExpList({ searchParams }: { searchParams: Promise<
               <input id={`f-${k}`} name={k} className="input" placeholder="contains…" defaultValue={q[k] ?? ""} />
             </div>
           ))}
-        </div>
-        <input type="hidden" name="size" value={size} />
-        <div className="flex gap-2">
-          <button className="btn btn-primary">Search</button>
-          {filtered && <Link className="btn" href="/exp">Clear</Link>}
+          <div className="flex items-end gap-2">
+            <input type="hidden" name="size" value={size} />
+            <button className="btn btn-primary">Search</button>
+            {filtered && <Link className="btn" href="/exp">Clear</Link>}
+          </div>
         </div>
       </form>
 

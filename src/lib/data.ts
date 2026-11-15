@@ -202,10 +202,10 @@ export const expInputOf = (e: typeof s.expEntries.$inferSelect): ExpInput => ({
   purpose: e.purpose, paymentMode: e.paymentMode, instrNo: e.instrNo, instrDate: e.instrDate, chqBank: e.chqBank, relatedEmpName: e.relatedEmpName,
 });
 
-/** Every Exp entry with its calculated columns, newest first. */
+/** Every Exp entry with its calculated columns, latest pay date first (entries without a date last). */
 async function expWithCalcRaw(): Promise<(ExpComputedRow & { id: number })[]> {
   const db = await getDb();
-  const [rows, ctx] = await Promise.all([db.select().from(s.expEntries).orderBy(desc(s.expEntries.id)), expContext()]);
+  const [rows, ctx] = await Promise.all([db.select().from(s.expEntries).orderBy(sql`${s.expEntries.payDate} desc nulls last`, desc(s.expEntries.id)), expContext()]);
   return rows.map((e) => ({ id: e.id, ...computeExp(expInputOf(e), ctx) }));
 }
 
