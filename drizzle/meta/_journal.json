@@ -43,6 +43,13 @@
       "when": 1794712748896,
       "tag": "0005_wise_thanos",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794773951520,
+      "tag": "0006_nervous_ender_wiggin",
+      "breakpoints": true
     }
   ]
 }

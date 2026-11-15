@@ -245,6 +245,38 @@ export const projections = pgTable("projections", {
   remarks: text("remarks"),
 }, (t) => [index("proj_year_idx").on(t.year)]);
 
+/** A half-entered Exp document saved by its author (header + lines as typed). */
+export const expDrafts = pgTable("exp_drafts", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  title: text("title").notNull(),
+  data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("draft_user_idx").on(t.userId)]);
+
+/** Files attached to an Exp document (cheque image, NOC copy ...). The file is kept base64-encoded in the database. */
+export const expAttachments = pgTable("exp_attachments", {
+  id: serial("id").primaryKey(),
+  docBase: text("doc_base").notNull(),
+  filename: text("filename").notNull(),
+  mime: text("mime").notNull(),
+  size: integer("size").notNull(),
+  data: text("data").notNull(),
+  uploadedBy: integer("uploaded_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("att_doc_idx").on(t.docBase)]);
+
+/** Clean-up proposals shown to the Master; nothing changes until a proposal is approved. */
+export const cleanupRuns = pgTable("cleanup_runs", {
+  id: serial("id").primaryKey(),
+  kind: text("kind").notNull(),
+  detail: jsonb("detail").$type<Record<string, unknown>>().notNull(),
+  affected: integer("affected").notNull().default(0),
+  appliedBy: integer("applied_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),

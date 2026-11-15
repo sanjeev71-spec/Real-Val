@@ -374,6 +374,7 @@ async function applyExpDoc(tx: Tx, action: string, d: ExpDocData, userId: number
   if (!cur.length) throw new Error(`Document ${base} no longer exists`);
   if (action === "delete_doc") {
     await tx.delete(s.expEntries).where(inArray(s.expEntries.id, cur.map((c) => c.id)));
+    await tx.delete(s.expAttachments).where(eq(s.expAttachments.docBase, base));
     return base;
   }
   // update_doc: lines with an id are edited, lines without one are added, lines left out are removed

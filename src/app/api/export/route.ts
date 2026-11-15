@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 import { currentUser } from "@/lib/auth";
 import { computedBookings } from "@/lib/data";
 import { BKG_COLUMNS, DATE_KEYS } from "@/lib/fields";
+import { filterBkg } from "@/lib/bkgFilter";
 
 export const dynamic = "force-dynamic";
 
@@ -9,15 +10,11 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const user = await currentUser();
   if (!user) return new Response("Sign in first", { status: 401 });
-  // Same partial-text filters as the Bkg page: Director, Builder, Project, Client, BkgID, UnitNo
+  // Same filters as the Bkg page
   const params = new URL(req.url).searchParams;
-  const terms = ["Director", "Builder", "Project", "Client", "BkgID", "UnitNo"]
-    .map((k) => [k, (params.get(k) ?? "").trim().toLowerCase()] as const)
-    .filter(([, v]) => v);
   let rows = await computedBookings();
   if (user.role === "sales") rows = rows.filter((r) => r.Emp === user.empCode);
-  const text = (r: Record<string, unknown>, k: string) => (k === "Director" ? String(r[k] ?? "").split("~")[0] : String(r[k] ?? "")).toLowerCase();
-  if (terms.length) rows = rows.filter((r) => terms.every(([k, v]) => text(r, k).includes(v)));
+  rows = filterBkg(rows, (k) => params.get(k));
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Bkg");

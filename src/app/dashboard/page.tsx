@@ -32,9 +32,15 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const pg = prows.length ? projectionGrid(prows.map(toProjRow), actuals, year, "revenue", Math.min(to, todaySerial()), "emp") : null;
   const maxRev = Math.max(1, ...d.months.map((m) => m.revenue)), maxBk = Math.max(1, ...d.months.map((m) => m.bookings)), maxCol = Math.max(1, ...d.months.map((m) => m.collections));
 
-  const Tile = ({ label, value, sub }: { label: string; value: string; sub?: string }) => (
-    <div className="card"><div className="text-xs uppercase tracking-wide text-[var(--muted)]">{label}</div><div className="mt-1 text-2xl font-semibold">{value}</div>{sub && <div className="text-xs text-[var(--muted)]">{sub}</div>}</div>
-  );
+  // every number opens the records behind it
+  const win = `from=${fromIso}&to=${toIso}`;
+  const soldWin = `/bookings?sold=1&${win}`;
+  const monthEnd = (key: string) => new Date(Date.UTC(+key.slice(0, 4), +key.slice(5, 7), 0)).toISOString().slice(0, 10);
+  const collHref = (key?: string) => `/exp?head=${encodeURIComponent("Recd From Client")}&${key ? `from=${key}-01&to=${monthEnd(key)}` : win}`;
+  const Tile = ({ label, value, sub, href }: { label: string; value: string; sub?: string; href?: string }) => {
+    const body = (<><div className="text-xs uppercase tracking-wide text-[var(--muted)]">{label}</div><div className="mt-1 text-2xl font-semibold">{value}</div>{sub && <div className="text-xs text-[var(--muted)]">{sub}</div>}</>);
+    return href ? <Link href={href} className="card block transition hover:border-[var(--brand)] hover:shadow-md" title="Open the records">{body}</Link> : <div className="card">{body}</div>;
+  };
 
   return (
     <div className="space-y-4">
@@ -48,26 +54,26 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Tile label="Bookings (Live + Not Live)" value={fmtNum(d.bookings)} sub={`${fmtNum(Math.round(d.area))} sq ft`} />
-        <Tile label="DirectorRevenue" value={cr(d.revenue)} />
-        <Tile label="Collections (Recd From Client)" value={cr(d.collections)} />
-        <Tile label="Paid expenses" value={cr(d.expenses)} />
-        <Tile label="Cancellations" value={fmtNum(d.cancelled)} sub={`${(d.cancelRate * 100).toFixed(0)}% of bookings in the period`} />
-        <Tile label="Revenue due (PendDue)" value={cr(d.pendDue)} sub="all live bookings, as of today" />
-        <Tile label="Billed, not yet received" value={cr(d.billOS)} sub="all live bookings, as of today" />
+        <Tile label="Bookings (Live + Not Live)" value={fmtNum(d.bookings)} sub={`${fmtNum(Math.round(d.area))} sq ft`} href={soldWin} />
+        <Tile label="DirectorRevenue" value={cr(d.revenue)} href={soldWin} />
+        <Tile label="Collections (Recd From Client)" value={cr(d.collections)} href={collHref()} />
+        <Tile label="Paid expenses" value={cr(d.expenses)} href={`/exp?rp=Payment&${win}`} />
+        <Tile label="Cancellations" value={fmtNum(d.cancelled)} sub={`${(d.cancelRate * 100).toFixed(0)}% of bookings in the period`} href={`/bookings?status=Cancel&${win}`} />
+        <Tile label="Revenue due (PendDue)" value={cr(d.pendDue)} sub="all live bookings, as of today" href="/bookings?sold=1&due=1" />
+        <Tile label="Billed, not yet received" value={cr(d.billOS)} sub="all live bookings, as of today" href="/bookings?sold=1&bill=1" />
         {pg && <Tile label={`Projection ${year} (YTD)`} value={pg.total.pct === null ? "-" : `${Math.round(pg.total.pct * 100)}%`} sub={`${cr(pg.total.ytdActual)} of ${cr(pg.total.ytdProjected)} target to date`} />}
       </div>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <Bars title="Bookings per month" data={d.months.map((m) => ({ label: m.label, v: m.bookings }))} max={maxBk} fmt={(v) => String(v)} />
-        <Bars title="DirectorRevenue per month" data={d.months.map((m) => ({ label: m.label, v: m.revenue }))} max={maxRev} fmt={cr} />
-        <Bars title="Collections per month" data={d.months.map((m) => ({ label: m.label, v: m.collections }))} max={maxCol} fmt={cr} />
+        <Bars title="Bookings per month" data={d.months.map((m) => ({ label: m.label, v: m.bookings, href: `/bookings?sold=1&month=${m.key}` }))} max={maxBk} fmt={(v) => String(v)} />
+        <Bars title="DirectorRevenue per month" data={d.months.map((m) => ({ label: m.label, v: m.revenue, href: `/bookings?sold=1&month=${m.key}` }))} max={maxRev} fmt={cr} />
+        <Bars title="Collections per month" data={d.months.map((m) => ({ label: m.label, v: m.collections, href: collHref(m.key) }))} max={maxCol} fmt={cr} />
       </div>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <SliceTable title="Top Directors (by revenue)" rows={d.topDirectors} />
-        <SliceTable title="Branches" rows={d.branches} />
-        <SliceTable title="Top projects" rows={d.projects} />
+        <SliceTable title="Top Directors (by revenue)" rows={d.topDirectors} href={(n) => `/bookings?sold=1&Director=${encodeURIComponent(n)}&${win}`} />
+        <SliceTable title="Branches" rows={d.branches} href={(n) => `/bookings?sold=1&branch=${encodeURIComponent(n)}&${win}`} />
+        <SliceTable title="Top projects" rows={d.projects} href={(n) => `/bookings?sold=1&Project=${encodeURIComponent(n)}&${win}`} />
       </div>
       <p className="text-xs text-[var(--muted)]">
         More: <Link className="underline" href="/reports/projection">Projection vs Actual</Link> · <Link className="underline" href="/reports/pnl">P&amp;L</Link> · <Link className="underline" href="/reports/demand">Demand</Link>
@@ -76,7 +82,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   );
 }
 
-function Bars({ title, data, max, fmt }: { title: string; data: { label: string; v: number }[]; max: number; fmt: (v: number) => string }) {
+function Bars({ title, data, max, fmt }: { title: string; data: { label: string; v: number; href?: string }[]; max: number; fmt: (v: number) => string }) {
   const w = 300, h = 110, n = Math.max(1, data.length), bw = Math.min(22, (w - 10) / n - 3);
   return (
     <div className="card">
@@ -87,7 +93,8 @@ function Bars({ title, data, max, fmt }: { title: string; data: { label: string;
           const x = 5 + i * ((w - 10) / n) + ((w - 10) / n - bw) / 2;
           return (
             <g key={i}>
-              <rect x={x} y={h - bh} width={bw} height={bh} rx={2} fill="var(--brand)" opacity={0.85}><title>{`${p.label}: ${fmt(p.v)}`}</title></rect>
+              {p.href && <a href={p.href}><rect x={x - 1} y={0} width={bw + 2} height={h + 14} fill="transparent" style={{ cursor: "pointer" }}><title>{`${p.label}: ${fmt(p.v)} — click to open`}</title></rect></a>}
+              <rect x={x} y={h - bh} width={bw} height={bh} rx={2} fill="var(--brand)" opacity={0.85} pointerEvents="none"><title>{`${p.label}: ${fmt(p.v)}`}</title></rect>
               {(n <= 14 || i % Math.ceil(n / 12) === 0) && <text x={x + bw / 2} y={h + 12} textAnchor="middle" fontSize="7" fill="currentColor" opacity={0.6}>{p.label}</text>}
             </g>
           );
@@ -98,14 +105,14 @@ function Bars({ title, data, max, fmt }: { title: string; data: { label: string;
   );
 }
 
-function SliceTable({ title, rows }: { title: string; rows: Slice[] }) {
+function SliceTable({ title, rows, href }: { title: string; rows: Slice[]; href?: (name: string) => string }) {
   return (
     <div className="card overflow-x-auto">
       <h2 className="h2">{title}</h2>
       <table className="table">
         <thead><tr><th>Name</th><th className="text-right">Bookings</th><th className="text-right">Revenue</th></tr></thead>
         <tbody>
-          {rows.map((r) => <tr key={r.name}><td>{r.name}</td><td className="text-right">{fmtNum(r.count)}</td><td className="text-right">{cr(r.revenue)}</td></tr>)}
+          {rows.map((r) => <tr key={r.name}><td>{href && r.name !== "(none)" ? <Link className="link" href={href(r.name)}>{r.name}</Link> : r.name}</td><td className="text-right">{fmtNum(r.count)}</td><td className="text-right">{cr(r.revenue)}</td></tr>)}
           {!rows.length && <tr><td colSpan={3} className="text-[var(--muted)]">No data.</td></tr>}
         </tbody>
       </table>

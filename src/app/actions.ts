@@ -8,7 +8,7 @@ const revalidatePath: typeof revalidate = (path, type) => {
   revalidate(path, type);
 };
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { normEmail, requestOtp, requireUser, signOut, verifyOtp, type Role } from "@/lib/auth";
 import { getDb, schema as s } from "@/lib/db";
 import * as wf from "@/lib/workflow";
@@ -211,4 +211,34 @@ export async function savePartnersAction(list: string[]) {
   await setSetting("partners", JSON.stringify(clean));
   revalidatePath("/", "layout");
   return { ok: true };
+}
+
+// ---- Exp drafts (a half-entered document, private to its author)
+export async function saveDraftAction(id: number | null, title: string, data: Record<string, unknown>) {
+  const user = await requireUser(["admin", "master"]);
+  const db = await getDb();
+  const t = title.trim().slice(0, 80) || "Untitled draft";
+  if (JSON.stringify(data).length > 600_000) return { ok: false as const, message: "This draft is too large to save" };
+  if (id) {
+    const res = await db.update(s.expDrafts).set({ title: t, data, updatedAt: new Date() }).where(and(eq(s.expDrafts.id, id), eq(s.expDrafts.userId, user.id))).returning({ id: s.expDrafts.id });
+    if (res.length) return { ok: true as const, id };
+  }
+  const [row] = await db.insert(s.expDrafts).values({ userId: user.id, title: t, data }).returning({ id: s.expDrafts.id });
+  return { ok: true as const, id: row.id };
+}
+export async function deleteDraftAction(id: number) {
+  const user = await requireUser(["admin", "master"]);
+  const db = await getDb();
+  await db.delete(s.expDrafts).where(and(eq(s.expDrafts.id, id), eq(s.expDrafts.userId, user.id)));
+  revalidatePath("/exp/new");
+  return { ok: true };
+}
+
+// ---- Clean-up (Master approves one proposal at a time)
+export async function applyCleanupAction(id: string, canonical?: string) {
+  const user = await requireUser(["master"]);
+  const { applyCleanup } = await import("@/lib/cleanup");
+  const r = await applyCleanup(user.id, id, canonical);
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
 }

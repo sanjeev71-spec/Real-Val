@@ -1,7 +1,8 @@
 "use client";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { expDocAction } from "@/app/actions";
+import { deleteDraftAction, expDocAction, saveDraftAction } from "@/app/actions";
+import { parsePaste } from "@/lib/pasteLines";
 import { fmtNum } from "@/lib/format";
 import { COMPANY } from "../lib/company";
 import { Lookup, type BkgHit } from "@/components/Lookup";
@@ -17,6 +18,7 @@ export interface ExpDocFormProps {
   knownBookings?: BkgHit[]; // bookings already used by the lines of this document (the rest are searched on demand)
   chqLists?: { purposes: string[]; paymentModes: string[]; banks: string[] };
   docBase?: string | null; // set when editing an existing document
+  draftId?: number | null; // set when a saved draft was opened
   initial?: { header: Record<string, V>; lines: DocLine[] };
 }
 
@@ -47,6 +49,10 @@ export function ExpDocForm(p: ExpDocFormProps) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
+  const [draftId, setDraftId] = useState<number | null>(p.draftId ?? null);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const [pasteWarn, setPasteWarn] = useState<string[]>([]);
   const isMaster = p.role === "master";
   const [bk, setBk] = useState<Map<string, BkgHit>>(() => new Map((p.knownBookings ?? []).map((b) => [b.id.toUpperCase(), b])));
   const bookingById = bk;
@@ -106,6 +112,32 @@ export function ExpDocForm(p: ExpDocFormProps) {
     return { rec, pay, net: rec - pay };
   }, [lines]);
 
+  /** Adds the pasted lines (from Excel) under the existing ones; header values fill whatever the paste leaves blank. */
+  function applyPaste() {
+    const r = parsePaste(pasteText, 300);
+    if (!r.lines.length) { setPasteWarn(r.warnings); return; }
+    const blank = lines.length === 1 && !lines[0].head && !lines[0].gross && !lines[0].bkgId;
+    const made: DocLine[] = r.lines.map((x) => ({
+      payDate: header.payDate, valueDate: header.valueDate, rp: "Receipt", head: null, mode: header.mode, branch: header.branch, gross: null, gst: null, tds: null,
+      bkgId: null, emp: null, project: null, narration: header.narration, remarks: null, ...x,
+    }));
+    setLines((ls) => (blank ? made : [...ls, ...made]).slice(0, 300));
+    setPasteWarn(r.warnings);
+    setPasteText("");
+    if (!r.warnings.length) setPasteOpen(false);
+    setMsg({ ok: true, text: `${made.length} line(s) added from the pasted text.${r.warnings.length ? " Check the notes below the paste box." : ""}` });
+  }
+
+  function saveDraft() {
+    setMsg(null);
+    start(async () => {
+      const title = String(header.docNo || lines.find((l) => l.narration)?.narration || lines[0]?.head || "Draft");
+      const r = await saveDraftAction(draftId, title, { header, lines });
+      if (r.ok) { setDraftId(r.id); setMsg({ ok: true, text: "Draft saved. Open it later from New Exp document → My drafts." }); }
+      else setMsg({ ok: false, text: r.message ?? "Could not save the draft" });
+    });
+  }
+
   function go(action: "create_doc" | "update_doc" | "delete_doc") {
     setMsg(null);
     if (action === "delete_doc" && !confirm(`Delete the whole document ${p.docBase} (${lines.length} lines)?${isMaster ? "" : " (Master must approve)"}`)) return;
@@ -116,6 +148,7 @@ export function ExpDocForm(p: ExpDocFormProps) {
         setMsg({ ok: false, text: r.message ?? "Please fix the highlighted fields." });
         return;
       }
+      if (draftId) await deleteDraftAction(draftId);
       if (r.applied) {
         setMsg({ ok: true, text: action === "delete_doc" ? "Deleted." : `Saved${r.ref ? ` as ${r.ref}` : ""}.` });
         router.push("/exp");
@@ -217,8 +250,25 @@ export function ExpDocForm(p: ExpDocFormProps) {
         <div className="flex flex-wrap items-center gap-3 px-5 pt-4">
           <h2 className="h2 mb-0">Lines ({lines.length})</h2>
           <span className="text-xs text-[var(--muted)]">Every field of a line is in one row — scroll sideways for the rest. Cheque / UTR columns are for Mode Chq.</span>
-          <button type="button" className="btn ml-auto" onClick={addLine}>+ Add line</button>
+          <span className="ml-auto flex gap-2">
+            <button type="button" className="btn" onClick={() => setPasteOpen((o) => !o)}>Paste from Excel</button>
+            <button type="button" className="btn" onClick={addLine}>+ Add line</button>
+          </span>
         </div>
+        {pasteOpen && (
+          <div className="mx-5 mt-3 rounded-lg border border-[var(--line)] bg-slate-50 p-3">
+            <p className="text-xs text-[var(--muted)]">
+              Copy the rows in Excel and paste them here (up to 300 lines). With a header row (Head, R/P, Gross, GST, TDS, BkgID, Employee, Narration, Remarks, Project, Mode, Pay date, Branch, Purpose, PaymentMode, Bank, Chq/UTR No, Chq/UTR Date) the columns are matched by name.
+              Without one, the order is: Head, R/P, Gross, GST, TDS, BkgID, Employee, Narration, Remarks.
+            </p>
+            <textarea className="input mt-2 h-32 w-full font-mono text-xs" value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder="Paste here" />
+            {pasteWarn.length > 0 && <ul className="mt-1 list-disc pl-5 text-xs text-amber-700">{pasteWarn.map((w, n) => <li key={n}>{w}</li>)}</ul>}
+            <div className="mt-2 flex gap-2">
+              <button type="button" className="btn btn-primary" disabled={!pasteText.trim()} onClick={applyPaste}>Add these lines</button>
+              <button type="button" className="btn" onClick={() => { setPasteOpen(false); setPasteWarn([]); }}>Close</button>
+            </div>
+          </div>
+        )}
         <div className="mt-3 max-h-[60vh] overflow-auto border-t border-[var(--line)]">
           <table className="table border-separate" style={{ minWidth: 70 + COLS.reduce((s, c) => s + c.w, 0) + 130 }}>
             <thead>
@@ -264,6 +314,7 @@ export function ExpDocForm(p: ExpDocFormProps) {
         <button className="btn btn-primary ml-auto" disabled={pending} onClick={() => go(editing ? "update_doc" : "create_doc")}>
           {pending ? "Saving…" : isMaster ? "Save document" : "Submit for Master approval"}
         </button>
+        {!editing && <button className="btn" disabled={pending} onClick={saveDraft} title="Keep what you have typed and finish later">{draftId ? "Update draft" : "Save draft"}</button>}
         {editing && <button className="btn btn-danger" disabled={pending} onClick={() => go("delete_doc")}>Delete document</button>}
       </section>
     </div>

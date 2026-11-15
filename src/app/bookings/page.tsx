@@ -3,11 +3,13 @@ import { requireUser } from "@/lib/auth";
 import { computedBookings } from "@/lib/data";
 import { fmtDate, fmtNum } from "@/lib/format";
 import { Pager } from "@/components/Pager";
+import { BKG_TEXT_FIELDS, activeBkgFilters, filterBkg } from "@/lib/bkgFilter";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const FIELDS: [string, string][] = [["Director", "Director"], ["Builder", "Builder"], ["Project", "Project"], ["Client", "Client name"], ["BkgID", "BkgID"], ["UnitNo", "UnitNo"]];
+const FIELDS = BKG_TEXT_FIELDS;
+const EXTRA_LABEL: Record<string, string> = { sold: "Live + Not Live", status: "Status", month: "Month", from: "From", to: "To", branch: "Branch", due: "Pending due", bill: "Billed, not received" };
 const PILL: Record<string, string> = {
   live: "bg-emerald-100 text-emerald-800", "not live": "bg-amber-100 text-amber-800", cancel: "bg-red-100 text-red-700", oa: "bg-slate-200 text-slate-700", "ic bkg": "bg-slate-200 text-slate-700",
 };
@@ -22,13 +24,16 @@ export default async function Bookings({ searchParams }: { searchParams: Promise
   const all = await computedBookings();
   const mine = user.role === "sales" ? all.filter((r) => r.Emp === user.empCode) : all;
 
-  const terms = FIELDS.map(([k]) => [k, (q[k] ?? "").trim().toLowerCase()] as const).filter(([, v]) => v);
-  const shown = terms.length ? mine.filter((r) => terms.every(([k, v]) => (k === "Director" ? nameOnly(r[k]) : text(r[k])).toLowerCase().includes(v))) : mine;
+  const get = (k: string) => q[k];
+  const shown = filterBkg(mine, get);
+  const active = activeBkgFilters(get);
+  const extra = active.filter(([k]) => k in EXTRA_LABEL);
   const pages = Math.max(1, Math.ceil(shown.length / size));
   const page = Math.min(pages, Math.max(1, Number(q.page) || 1));
   const rows = shown.slice((page - 1) * size, page * size);
-  const params = Object.fromEntries(terms.map(([k]) => [k, q[k]!.trim()]));
+  const params = Object.fromEntries(active);
   const exportHref = `/api/export?${new URLSearchParams(params)}`;
+  const terms = active;
 
   return (
     <div className="space-y-4">
@@ -46,9 +51,17 @@ export default async function Bookings({ searchParams }: { searchParams: Promise
           </div>
         ))}
         <input type="hidden" name="size" value={size} />
+        {extra.map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
         <button className="btn btn-primary">Search</button>
         {terms.length > 0 && <Link className="btn" href="/bookings">Clear</Link>}
       </form>
+
+      {extra.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-[var(--muted)]">Showing:</span>
+          {extra.map(([k, v]) => <span key={k} className="rounded-full bg-slate-100 px-2.5 py-1">{EXTRA_LABEL[k]}{v === "1" ? "" : `: ${v}`}</span>)}
+        </div>
+      )}
 
       <div className="tablewrap">
         <table className="table">
