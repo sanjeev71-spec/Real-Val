@@ -24,10 +24,10 @@ describe("findExceptions", () => {
     const g = Object.fromEntries(findExceptions(bk, ex, new Set(["A~1"]), new Set(["fees", "recd from client"])).map((x) => [x.key, x]));
     expect(g["exp-no-head"].count).toBe(1);
     expect(g["exp-unknown-head"].count).toBe(1);
-    expect(g["exp-bkg-missing"].items[0].ref).toBe("RP00003");
+    expect(g["exp-bkg-missing"].rows[0].DocNo).toBe("RP00003");
     expect(g["exp-collection-no-bkg"].count).toBe(1);
     expect(g["chq-duplicate"].count).toBe(1);
-    expect(g["bkg-no-revenue"].items.map((i) => i.ref)).toEqual(["B1"]); // the cancelled booking is not reported
+    expect(g["bkg-no-revenue"].rows.map((i) => i.BkgID)).toEqual(["B1"]); expect(g["bkg-no-revenue"].kind).toBe("bkg"); // the cancelled booking is not reported
     expect(g["bkg-no-director"].count).toBe(1);
     expect(g["bkg-emp-unknown"].count).toBe(1);
   });
