@@ -30,6 +30,18 @@ export function filterBkg<T extends Row>(rows: T[], get: (k: string) => string |
   });
 }
 
+/** Bkg Date (BkgLoginDate) order: latest first ("desc") or latest last ("asc"). Rows without a date go to the far end of each order; ties by BkgID. */
+export function sortBkgByDate<T extends Row>(rows: T[], dir: "desc" | "asc"): T[] {
+  const d = (r: T) => text(r.BkgLoginDate);
+  const cmp = (a: T, b: T) => {
+    const x = d(a), y = d(b);
+    if (x !== y) return x === "" ? 1 : y === "" ? -1 : x < y ? 1 : -1; // desc, blanks last
+    return text(b.BkgID) < text(a.BkgID) ? -1 : text(b.BkgID) > text(a.BkgID) ? 1 : 0;
+  };
+  const desc = [...rows].sort(cmp);
+  return dir === "desc" ? desc : desc.reverse();
+}
+
 export function activeBkgFilters(get: (k: string) => string | null | undefined): [string, string][] {
   return BKG_FILTER_KEYS.map((k) => [k, (get(k) ?? "").trim()] as [string, string]).filter(([, v]) => v);
 }

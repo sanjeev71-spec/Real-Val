@@ -2,11 +2,14 @@ import "server-only";
 import ExcelJS from "exceljs";
 import { BKG_COLUMNS, DATE_KEYS } from "@/lib/fields";
 import { EXP_COLUMNS } from "@/lib/calc/exp";
+import { sortBkgByDate } from "@/lib/bkgFilter";
 
 // One place that builds the Bkg and Exp workbooks, so the Bkg, Exp and Data exceptions downloads always have the same format.
 type Row = Record<string, unknown>;
 
-export async function bkgWorkbook(rows: Row[]): Promise<ArrayBuffer> {
+/** Written in Bkg Date order with the latest booking at the bottom (the list on screen shows the latest on top). */
+export async function bkgWorkbook(rowsAny: Row[]): Promise<ArrayBuffer> {
+  const rows = sortBkgByDate(rowsAny, "asc");
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Bkg");
   ws.columns = BKG_COLUMNS.map((c) => ({ header: c, key: c, width: Math.max(10, c.length + 2), style: DATE_KEYS.has(c) ? { numFmt: "dd-mm-yyyy" } : {} }));

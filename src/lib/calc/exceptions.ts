@@ -1,5 +1,6 @@
 // Data exceptions: records that look incomplete or inconsistent, found from the calculated Bkg and Exp.
 // Each check returns the real Bkg / Exp rows, so the page and the download show them exactly like the Bkg and Exp pages.
+import { sortBkgByDate } from "../bkgFilter";
 type Row = Record<string, unknown>;
 const t = (v: unknown) => String(v ?? "").trim();
 const n = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);
@@ -67,6 +68,7 @@ export function findExceptions(bk: Row[], exps: (Row & { id?: number })[], empNa
   add("bkg-no-month", "Live bookings with no booking month", "They fall outside every month on the dashboard and P&L.", "medium", "bkg",
     live.filter((b) => !t(b.BkgMonth)));
 
+  for (const g of groups) if (g.kind === "bkg") g.rows = sortBkgByDate(g.rows, "desc");
   const order = { high: 0, medium: 1, low: 2 };
   return groups.sort((a, b) => order[a.severity] - order[b.severity] || b.count - a.count);
 }

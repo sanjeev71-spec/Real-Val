@@ -3,13 +3,13 @@ import { requireUser } from "@/lib/auth";
 import { computedBookings } from "@/lib/data";
 import { Pager } from "@/components/Pager";
 import { BkgTable } from "@/components/BkgTable";
-import { BKG_TEXT_FIELDS, activeBkgFilters, filterBkg } from "@/lib/bkgFilter";
+import { BKG_TEXT_FIELDS, activeBkgFilters, filterBkg, sortBkgByDate } from "@/lib/bkgFilter";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const FIELDS = BKG_TEXT_FIELDS;
-const EXTRA_LABEL: Record<string, string> = { sold: "Live + Not Live", status: "Status", month: "Month", from: "From", to: "To", branch: "Branch", due: "Pending due", bill: "Billed, not received" };
+const EXTRA_LABEL: Record<string, string> = { sold: "Live + Not Live", month: "Month", from: "From", to: "To", branch: "Branch", due: "Pending due", bill: "Billed, not received" };
 
 export default async function Bookings({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const user = await requireUser(["master", "admin", "sales"]);
@@ -19,7 +19,8 @@ export default async function Bookings({ searchParams }: { searchParams: Promise
   const mine = user.role === "sales" ? all.filter((r) => r.Emp === user.empCode) : all;
 
   const get = (k: string) => q[k];
-  const shown = filterBkg(mine, get);
+  const shown = sortBkgByDate(filterBkg(mine, get), "desc"); // latest Bkg Date on top
+  const statuses = [...new Set(mine.map((r) => String(r.FormStatus ?? "").trim()).filter(Boolean))].sort();
   const active = activeBkgFilters(get);
   const extra = active.filter(([k]) => k in EXTRA_LABEL);
   const pages = Math.max(1, Math.ceil(shown.length / size));
@@ -44,6 +45,12 @@ export default async function Bookings({ searchParams }: { searchParams: Promise
             <input id={`s-${k}`} name={k} className="input" placeholder="contains…" defaultValue={q[k] ?? ""} />
           </div>
         ))}
+        <div className="min-w-[9rem] flex-1">
+          <label className="label" htmlFor="s-status">FormStatus</label>
+          <select id="s-status" name="status" className="input" defaultValue={q.status ?? ""}>
+            <option value="">All</option>{statuses.map((x) => <option key={x}>{x}</option>)}
+          </select>
+        </div>
         <input type="hidden" name="size" value={size} />
         {extra.map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
         <button className="btn btn-primary">Search</button>
