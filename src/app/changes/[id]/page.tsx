@@ -26,10 +26,12 @@ export default async function ChangePage({ params }: { params: Promise<{ id: str
   const d = cr.data as Record<string, unknown>;
   const before = (cr.before ?? {}) as Record<string, unknown>;
   const after: Record<string, unknown> = cr.entity === "emp" && d.changes ? (d.changes as Record<string, unknown>) : d;
-  const keys = Object.keys(after).filter((k) => !HIDE.has(k) && k !== "changes" && k !== "reassign" && k !== "lines" && (canSeePII || !PII.has(k)));
+  const keys = Object.keys(after).filter((k) => !HIDE.has(k) && k !== "changes" && k !== "reassign" && k !== "lines" && k !== "creates" && k !== "updates" && k !== "fileName" && (canSeePII || !PII.has(k)));
   const lines = Array.isArray(d.lines) ? (d.lines as Record<string, unknown>[]) : null;
   const beforeLines = Array.isArray(before.lines) ? (before.lines as Record<string, unknown>[]) : [];
   const LINE_COLS = ["docNo", "head", "rp", "mode", "gross", "gst", "tds", "bkgId", "emp", "payDate", "narration", "instrNo", "paymentMode"];
+  const creates = Array.isArray(d.creates) ? (d.creates as { docBase: string | null; lines: Record<string, unknown>[] }[]) : [];
+  const updates = Array.isArray(d.updates) ? (d.updates as { id: number; docNo: string; changes: { field: string; from: unknown; to: unknown }[] }[]) : [];
   const nudgeWait = cr.lastNudgeAt ? Math.max(0, NUDGE_HOURS * 3600_000 - (Date.now() - cr.lastNudgeAt.getTime())) : 0;
 
   return (
@@ -50,6 +52,42 @@ export default async function ChangePage({ params }: { params: Promise<{ id: str
 
       <ChangeDecision id={cr.id} isMaster={user.role === "master" && cr.status === "pending"} isRequester={cr.requestedBy === user.id && cr.status === "pending"} nudgeWaitMs={nudgeWait} />
 
+      {cr.action === "bulk_upload" && (
+        <>
+          <div className="card text-sm">File <b>{String(d.fileName ?? "")}</b>: {creates.length} new document(s) · {updates.length} existing line(s) changed. It is applied as one change, or not at all.</div>
+          {updates.length > 0 && (
+            <section className="card overflow-x-auto">
+              <h2 className="h2">Existing lines to change ({updates.length})</h2>
+              <table className="table">
+                <thead><tr><th>DocNo</th><th>Field</th><th>Before</th><th>After</th></tr></thead>
+                <tbody>
+                  {updates.flatMap((u) => u.changes.map((c, i) => (
+                    <tr key={`${u.id}-${c.field}`} className="bg-amber-50">
+                      <td>{i === 0 ? u.docNo : ""}</td><td className="text-[var(--muted)]">{c.field}</td><td>{show(c.from)}</td><td className="font-medium">{show(c.to)}</td>
+                    </tr>
+                  )))}
+                </tbody>
+              </table>
+            </section>
+          )}
+          {creates.length > 0 && (
+            <section className="card overflow-x-auto">
+              <h2 className="h2">New documents ({creates.length})</h2>
+              <table className="table">
+                <thead><tr><th>Document</th><th>#</th>{LINE_COLS.filter((c) => c !== "docNo").map((c) => <th key={c}>{c}</th>)}</tr></thead>
+                <tbody>
+                  {creates.flatMap((c, di) => c.lines.map((l, i) => (
+                    <tr key={`${di}-${i}`} className="bg-green-50">
+                      <td>{i === 0 ? (c.docBase ?? "auto number") : ""}</td><td className="text-xs text-[var(--muted)]">{i + 1}</td>
+                      {LINE_COLS.filter((x) => x !== "docNo").map((x) => <td key={x}>{show(l[x])}</td>)}
+                    </tr>
+                  )))}
+                </tbody>
+              </table>
+            </section>
+          )}
+        </>
+      )}
       {keys.length > 0 && (
         <section className="card overflow-x-auto">
           <h2 className="h2">{cr.action === "create" || cr.action === "create_doc" ? "New values" : cr.action === "delete" ? "Entry to delete" : "Document"}</h2>

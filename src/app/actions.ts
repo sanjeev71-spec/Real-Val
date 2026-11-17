@@ -13,7 +13,7 @@ import { normEmail, requestOtp, requireUser, signOut, verifyOtp, type Role } fro
 import { getDb, schema as s } from "@/lib/db";
 import * as wf from "@/lib/workflow";
 import { checkRows, commitRows, parseUpload, type BulkRow } from "@/lib/bulk";
-import { checkExpRows, type ExpBulkRow } from "@/lib/bulkExp";
+import { checkExpUpload, type ExpBulkCounts, type ExpBulkRow } from "@/lib/bulkExp";
 
 // ---- sign-in
 export async function sendCodeAction(email: string) {
@@ -100,27 +100,28 @@ export async function bulkCommitAction(form: FormData) {
   }
 }
 
-// ---- Exp bulk upload (Master only)
-export async function bulkExpCheckAction(form: FormData): Promise<{ ok: boolean; message?: string; rows?: ExpBulkRow[]; warnings?: string[]; documents?: number }> {
-  await requireUser(["master"]);
+// ---- Exp upload: add new transactions and / or change existing lines (Master applies at once, Admin needs Master approval)
+const expOpts = (form: FormData) => ({ allowAdd: form.get("allowAdd") === "1", allowUpdate: form.get("allowUpdate") === "1" });
+export async function bulkExpCheckAction(form: FormData): Promise<{ ok: boolean; message?: string; rows?: ExpBulkRow[]; warnings?: string[]; counts?: ExpBulkCounts }> {
+  await requireUser(["admin", "master"]);
   try {
     const { rows } = await readFile(form);
-    const { docs: _docs, ...res } = await checkExpRows(rows);
-    void _docs;
-    return { ok: true, ...res };
+    const res = await checkExpUpload(rows, expOpts(form));
+    return { ok: true, rows: res.rows, warnings: res.warnings, counts: res.counts };
   } catch (e) {
     return { ok: false, message: (e as Error).message };
   }
 }
-export async function bulkExpCommitAction(form: FormData): Promise<{ ok: boolean; message?: string; docNos?: string[] }> {
-  const user = await requireUser(["master"]);
+export async function bulkExpCommitAction(form: FormData): Promise<{ ok: boolean; message?: string; applied?: boolean; id?: number; counts?: ExpBulkCounts }> {
+  const user = await requireUser(["admin", "master"]);
   try {
     const { name, rows } = await readFile(form);
-    const res = await checkExpRows(rows);
+    const res = await checkExpUpload(rows, expOpts(form));
     if (res.rows.some((r) => Object.keys(r.errors).length)) return { ok: false, message: "Some rows have errors - check again." };
-    const docNos = await ch.bulkCreateExpDocs(user, res.docs, name);
+    const r = await ch.requestExpUpload(user, { fileName: name, creates: res.creates, updates: res.updates }, res.before);
+    if (!r.ok) return { ok: false, message: r.message ?? "Could not save." };
     revalidatePath("/", "layout");
-    return { ok: true, docNos };
+    return { ok: true, applied: r.applied ?? false, id: r.id, counts: res.counts };
   } catch (e) {
     return { ok: false, message: (e as Error).message };
   }

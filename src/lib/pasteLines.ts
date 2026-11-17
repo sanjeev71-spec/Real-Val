@@ -22,6 +22,9 @@ const ALIASES: Record<string, string> = {
   "chq / utr date": "instrDate", "chq/utr date": "instrDate", "utr date": "instrDate", "chq date": "instrDate", "instr date": "instrDate",
 };
 
+/** The field a column header stands for (undefined when the column is not one we read). */
+export const fieldOfHeader = (h: string): string | undefined => ALIASES[h.trim().toLowerCase().replace(/\s+/g, " ")];
+
 const NUMERIC = new Set(["gross", "gst", "tds"]);
 const DATES = new Set(["payDate", "valueDate", "instrDate"]);
 

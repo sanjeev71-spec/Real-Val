@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 /** Exp bulk-upload template: ?format=xlsx (example rows and instructions) or ?format=csv (headers only). */
 export async function GET(req: Request) {
   const user = await currentUser();
-  if (!user || user.role !== "master") return new Response("Master only", { status: 403 });
+  if (!user || (user.role !== "master" && user.role !== "admin")) return new Response("Admin or Master only", { status: 403 });
   if (new URL(req.url).searchParams.get("format") === "csv") {
     return new Response("﻿" + expTemplateCsv(), {
       headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="Exp-upload-template.csv"' },

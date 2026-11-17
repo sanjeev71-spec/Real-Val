@@ -8,6 +8,7 @@ export const CHANGE_STATUS: Record<string, string> = {
 };
 
 export function describeChange(entity: string, d: Record<string, unknown>) {
+  if (Array.isArray(d.creates) || Array.isArray(d.updates)) return `Upload ${d.fileName ?? ""}: ${(d.creates as unknown[] | undefined)?.length ?? 0} new document(s), ${(d.updates as unknown[] | undefined)?.length ?? 0} changed line(s)`;
   if (entity === "exp" && Array.isArray(d.lines)) {
     const ls = d.lines as { rp?: string; gross?: number | string }[];
     const net = ls.reduce((a, l) => a + (l.rp === "Receipt" ? 1 : -1) * (Number(l.gross) || 0), 0);

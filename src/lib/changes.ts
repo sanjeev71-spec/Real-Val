@@ -24,7 +24,7 @@ const txt = (v: unknown) => (v === null || v === undefined || String(v).trim() =
 
 export const ENTITY_LABEL: Record<string, string> = { exp: "Exp", emp: "Emp" };
 export const ACTION_LABEL: Record<string, string> = {
-  create: "New entry", update: "Edit", delete: "Delete", create_doc: "New document", update_doc: "Edit document", delete_doc: "Delete document", merge_docs: "Merge entries into one document", split_line: "Split a line into its own document", change: "Effective change", correct: "Correct details", exit: "Exit",
+  create: "New entry", update: "Edit", delete: "Delete", create_doc: "New document", update_doc: "Edit document", delete_doc: "Delete document", bulk_upload: "Upload (add / update)", merge_docs: "Merge entries into one document", split_line: "Split a line into its own document", change: "Effective change", correct: "Correct details", exit: "Exit",
 };
 
 // =================================================================== Exp
@@ -108,7 +108,8 @@ async function nextDocNo(tx: Tx, mode: string | null): Promise<string> {
   return `${prefix}${String((rows[0]?.n ?? 0) + 1).padStart(5, "0")}`;
 }
 
-async function applyExp(tx: Tx, action: string, targetId: number | null, d: ExpData, userId: number): Promise<string> {
+async function applyExp(tx: Tx, action: string, targetId: number | null, d: ExpData, userId: number, before: Record<string, unknown> | null = null): Promise<string> {
+  if (action === "bulk_upload") return applyBulkUpload(tx, d as never, before, userId);
   if (action === "merge_docs") return applyMerge(tx, d as never);
   if (action === "split_line") return applySplit(tx, d as never);
   if (action.endsWith("_doc")) return applyExpDoc(tx, action, d as unknown as ExpDocData, userId);
@@ -414,16 +415,44 @@ export async function requestExpDoc(user: User, action: "create_doc" | "update_d
   return submit(user, "exp", action, null, n.data as never, before);
 }
 
-/** Master bulk upload: every document is created in one transaction (all or nothing) and the upload is logged once in the audit log. */
-export async function bulkCreateExpDocs(user: User, docs: ExpDocData[], fileName: string): Promise<string[]> {
-  if (user.role !== "master") throw new Error("Only Master can bulk upload Exp.");
-  const db = await getDb();
-  return db.transaction(async (tx) => {
-    const bases: string[] = [];
-    for (const d of docs) bases.push(await applyExpDoc(tx, "create_doc", d, user.id));
-    await tx.insert(s.auditLog).values({ userId: user.id, action: "bulk_exp_upload", detail: { fileName, documents: bases.length, lines: docs.reduce((a, d) => a + d.lines.length, 0), docNos: bases } });
-    return bases;
-  });
+// =================================================================== upload: add new documents and / or change existing lines (one transaction)
+
+const EXP_NUM_FIELDS = new Set(["gross", "gst", "tds"]);
+/** A field value in a form that compares equal when it means the same (blank = blank, 100 = "100.00"). */
+export const fieldKey = (k: string, v: unknown): string => {
+  if (v === null || v === undefined || String(v).trim() === "") return "";
+  if (EXP_NUM_FIELDS.has(k)) {
+    const n = Number(String(v).replace(/[,\s]/g, ""));
+    return Number.isFinite(n) ? String(n) : String(v).trim();
+  }
+  return String(v).trim();
+};
+
+export interface ExpUploadUpdate { id: number; docNo: string; values: ExpData; changes: { field: string; from: unknown; to: unknown }[] }
+export interface ExpUploadData { fileName: string; creates: ExpDocData[]; updates: ExpUploadUpdate[] }
+
+async function applyBulkUpload(tx: Tx, d: ExpUploadData, before: Record<string, unknown> | null, userId: number): Promise<string> {
+  const was = (before?.rows ?? {}) as Record<string, Record<string, unknown>>;
+  for (const u of d.updates ?? []) {
+    const [cur] = await tx.select().from(s.expEntries).where(eq(s.expEntries.id, u.id));
+    if (!cur) throw new Error(`${u.docNo} no longer exists`);
+    const old = was[String(u.id)];
+    if (old && EXP_FIELDS.some((k) => fieldKey(k, old[k]) !== fieldKey(k, (cur as Record<string, unknown>)[k]))) throw new Error(`${u.docNo} was changed after this upload was prepared - upload again`);
+    await tx.update(s.expEntries).set({ ...lineValues(u.values as ExpDocLine), updatedAt: new Date() } as never).where(eq(s.expEntries.id, u.id));
+  }
+  for (const c of d.creates ?? []) await applyExpDoc(tx, "create_doc", c as unknown as ExpDocData as never, userId);
+  return `${(d.creates ?? []).length} new · ${(d.updates ?? []).length} changed`;
+}
+
+/** Master: applied at once. Admin: waits for Master approval. Either way it is one all-or-nothing change in the log. */
+export async function requestExpUpload(user: User, data: ExpUploadData, before: Record<string, unknown>): Promise<ChangeResult> {
+  if (user.role !== "admin" && user.role !== "master") return { ok: false, errors: {}, message: "Only Admin or Master can upload Exp." };
+  if (!data.creates.length && !data.updates.length) return { ok: false, errors: {}, message: "Nothing to add or change in this file." };
+  try {
+    return await submit(user, "exp", "bulk_upload", null, data as unknown as Record<string, unknown>, before);
+  } catch (e) {
+    return { ok: false, errors: {}, message: (e as Error).message };
+  }
 }
 
 // =================================================================== merge entries into one document / split a line out
@@ -509,7 +538,7 @@ async function submit(user: User, entity: "exp" | "emp", action: string, targetI
   const db = await getDb();
   if (user.role === "master") {
     const ref = await db.transaction(async (tx) => {
-      const ref = entity === "exp" ? await applyExp(tx, action, targetId, data as ExpData, user.id) : await applyEmp(tx, action, data);
+      const ref = entity === "exp" ? await applyExp(tx, action, targetId, data as ExpData, user.id, before) : await applyEmp(tx, action, data);
       await tx.insert(s.changeRequests).values({
         entity, action, targetId, data, before, status: "approved", requestedBy: user.id, decidedBy: user.id, decidedAt: new Date(), resultRef: ref, comment: "Done directly by Master",
       });
@@ -523,6 +552,7 @@ async function submit(user: User, entity: "exp" | "emp", action: string, targetI
 }
 
 function summary(entity: string, action: string, d: Record<string, unknown>) {
+  if (action === "bulk_upload") return `Upload ${esc(d.fileName)} — ${(d.creates as unknown[] | undefined)?.length ?? 0} new document(s), ${(d.updates as unknown[] | undefined)?.length ?? 0} changed line(s)`;
   if (entity === "exp" && Array.isArray(d.lines)) {
     const ls = d.lines as ExpDocLine[];
     const net = ls.reduce((a, l) => a + (l.rp === "Receipt" ? 1 : -1) * (Number(l.gross) || 0), 0);
@@ -550,7 +580,7 @@ export async function decideChange(user: User, id: number, approve: boolean, com
   let ref: string | null = null;
   try {
     await db.transaction(async (tx) => {
-      if (approve) ref = cr.entity === "exp" ? await applyExp(tx, cr.action, cr.targetId, cr.data as ExpData, cr.requestedBy) : await applyEmp(tx, cr.action, cr.data);
+      if (approve) ref = cr.entity === "exp" ? await applyExp(tx, cr.action, cr.targetId, cr.data as ExpData, cr.requestedBy, cr.before ?? null) : await applyEmp(tx, cr.action, cr.data);
       await tx.update(s.changeRequests).set({ status: approve ? "approved" : "rejected", decidedBy: user.id, decidedAt: new Date(), comment: comment || null, resultRef: ref }).where(eq(s.changeRequests.id, id));
     });
   } catch (err) {
