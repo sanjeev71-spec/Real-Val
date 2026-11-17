@@ -13,6 +13,7 @@ import { normEmail, requestOtp, requireUser, signOut, verifyOtp, type Role } fro
 import { getDb, schema as s } from "@/lib/db";
 import * as wf from "@/lib/workflow";
 import { checkRows, commitRows, parseUpload, type BulkRow } from "@/lib/bulk";
+import { checkExpRows, type ExpBulkRow } from "@/lib/bulkExp";
 
 // ---- sign-in
 export async function sendCodeAction(email: string) {
@@ -94,6 +95,32 @@ export async function bulkCommitAction(form: FormData) {
     const res = await commitRows(rows, user, name);
     if (res.ok) revalidatePath("/", "layout");
     return res.ok ? { ok: true, ids: res.ids } : { ok: false, message: "Some rows have errors — check again." };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+
+// ---- Exp bulk upload (Master only)
+export async function bulkExpCheckAction(form: FormData): Promise<{ ok: boolean; message?: string; rows?: ExpBulkRow[]; warnings?: string[]; documents?: number }> {
+  await requireUser(["master"]);
+  try {
+    const { rows } = await readFile(form);
+    const { docs: _docs, ...res } = await checkExpRows(rows);
+    void _docs;
+    return { ok: true, ...res };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+export async function bulkExpCommitAction(form: FormData): Promise<{ ok: boolean; message?: string; docNos?: string[] }> {
+  const user = await requireUser(["master"]);
+  try {
+    const { name, rows } = await readFile(form);
+    const res = await checkExpRows(rows);
+    if (res.rows.some((r) => Object.keys(r.errors).length)) return { ok: false, message: "Some rows have errors - check again." };
+    const docNos = await ch.bulkCreateExpDocs(user, res.docs, name);
+    revalidatePath("/", "layout");
+    return { ok: true, docNos };
   } catch (e) {
     return { ok: false, message: (e as Error).message };
   }

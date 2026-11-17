@@ -25,7 +25,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         { label: "Sales", items: [...item("/scd/new", `New ${COMPANY.form}`, role !== "hr"), ...item("/submissions", `${COMPANY.form} Approval`, role !== "hr"), ...item("/bookings", "Bkg", role !== "hr"), ...item("/reports/demand", "Demand", role !== "hr")] },
         { label: "Accounts", items: [...item("/exp", "Exp", masterOrAdmin), ...item("/changes", "Exp/Emp approvals", role !== "sales"), ...item("/reports/pnl", "P&L", role === "master"), ...item("/reports/projection", "Projection", masterOrAdmin), ...item("/reports/exceptions", "Data exceptions", masterOrAdmin)] },
         { label: "People", items: [...item("/emp", "Emp", role === "hr" || role === "master"), ...item("/reports/org", "Org chart", role !== "sales")] },
-        { label: "Admin", items: [...item("/bulk", "Bulk upload", role === "master"), ...item("/admin/masters", "Masters", role === "master"), ...item("/admin/projection", "Projection targets", role === "master"), ...item("/admin/users", "Users", role === "master"), ...item("/admin/cleanup", "Clean-up", role === "master")] },
+        { label: "Admin", items: [...item("/bulk", "Bulk upload", role === "master"), ...item("/bulk/exp", "Bulk upload Exp", role === "master"), ...item("/admin/masters", "Masters", role === "master"), ...item("/admin/projection", "Projection targets", role === "master"), ...item("/admin/users", "Users", role === "master"), ...item("/admin/cleanup", "Clean-up", role === "master")] },
       ].filter((g) => g.items.length)
     : [];
   return (

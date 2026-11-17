@@ -414,6 +414,18 @@ export async function requestExpDoc(user: User, action: "create_doc" | "update_d
   return submit(user, "exp", action, null, n.data as never, before);
 }
 
+/** Master bulk upload: every document is created in one transaction (all or nothing) and the upload is logged once in the audit log. */
+export async function bulkCreateExpDocs(user: User, docs: ExpDocData[], fileName: string): Promise<string[]> {
+  if (user.role !== "master") throw new Error("Only Master can bulk upload Exp.");
+  const db = await getDb();
+  return db.transaction(async (tx) => {
+    const bases: string[] = [];
+    for (const d of docs) bases.push(await applyExpDoc(tx, "create_doc", d, user.id));
+    await tx.insert(s.auditLog).values({ userId: user.id, action: "bulk_exp_upload", detail: { fileName, documents: bases.length, lines: docs.reduce((a, d) => a + d.lines.length, 0), docNos: bases } });
+    return bases;
+  });
+}
+
 // =================================================================== merge entries into one document / split a line out
 
 export const MERGE_MIN = 2;
