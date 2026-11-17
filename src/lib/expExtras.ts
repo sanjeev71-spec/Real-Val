@@ -51,6 +51,18 @@ export function describeChange(action: string, data: Row, before: Row | null): s
   return keys.length ? `Changed ${keys.map((k) => FIELD_LABEL[k]).join(", ")}` : "Saved with no change";
 }
 
+/** What an Exp upload did to this document: old → new for each changed line, or that it created it. */
+function describeUpload(data: Row, lineDocNos: string[], base: string): string {
+  const parts: string[] = [];
+  for (const u of (Array.isArray(data.updates) ? data.updates : []) as Row[]) {
+    if (!lineDocNos.includes(String(u.docNo))) continue;
+    const ch = (Array.isArray(u.changes) ? u.changes : []) as { field: string; from: unknown; to: unknown }[];
+    parts.push(`${u.docNo}: ${ch.map((c) => `${c.field} ${norm(c.from) || "—"} → ${norm(c.to) || "—"}`).join("; ") || "no change"}`);
+  }
+  if (((Array.isArray(data.creates) ? data.creates : []) as Row[]).some((c) => c.docBase === base || c.docNo === base)) parts.push("Created");
+  return `Upload (${String(data.fileName ?? "file")}) — ${parts.join(" | ")}`;
+}
+
 /** Everything that was requested, approved or rejected for one Exp document, newest first. */
 export async function docHistory(base: string, lineDocNos: string[] = []): Promise<HistoryItem[]> {
   const db = await getDb();
@@ -62,14 +74,17 @@ export async function docHistory(base: string, lineDocNos: string[] = []): Promi
     left join users ru on ru.id = cr.requested_by
     left join users du on du.id = cr.decided_by
     where cr.entity = 'exp' and (cr.data->>'docBase' = ${base} or cr.before->>'docBase' = ${base} or cr.result_ref = ${base} or cr.data->'mergedBases' @> to_jsonb(${base}::text)
-       or cr.data->>'docNo' = any(${sql.raw(`array[${likeLines.map((x) => `'${x.replace(/'/g, "''")}'`).join(",")}]::text[]`)}))
+       or cr.data->>'docNo' = any(${sql.raw(`array[${likeLines.map((x) => `'${x.replace(/'/g, "''")}'`).join(",")}]::text[]`)})
+       or (cr.action = 'bulk_upload' and (
+            exists (select 1 from jsonb_array_elements(coalesce(cr.data->'updates','[]'::jsonb)) u where u->>'docNo' = any(${sql.raw(`array[${likeLines.map((x) => `'${x.replace(/'/g, "''")}'`).join(",")}]::text[]`)}))
+         or exists (select 1 from jsonb_array_elements(coalesce(cr.data->'creates','[]'::jsonb)) c where c->>'docBase' = ${base} or c->>'docNo' = ${base}))))
     order by cr.id desc
     limit 100`));
   return r.map((x) => ({
     id: Number(x.id), action: String(x.action), status: String(x.status), comment: (x.comment as string) ?? null,
     requestedBy: String(x.req_name ?? "—"), decidedBy: (x.dec_name as string) ?? null,
     createdAt: new Date(x.created_at as string).toISOString(), decidedAt: x.decided_at ? new Date(x.decided_at as string).toISOString() : null,
-    summary: describeChange(String(x.action), (x.data ?? {}) as Row, (x.before ?? null) as Row | null),
+    summary: String(x.action) === "bulk_upload" ? describeUpload((x.data ?? {}) as Row, likeLines, base) : describeChange(String(x.action), (x.data ?? {}) as Row, (x.before ?? null) as Row | null),
   }));
 }
 
