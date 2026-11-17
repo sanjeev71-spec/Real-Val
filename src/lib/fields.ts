@@ -3,7 +3,7 @@ import { COMPANY } from "./company";
 
 export const BKG_COLUMNS = [
   "BkgMonth","BkgLoginDate","FormStatus","SourceOfLead","PropertyType","Director","Emp","BkgID","Client","CoApplicant",
-  "Address","AreaSectorColony","City","State","PIN","Mobile2","Email","Aadhaar","PAN","Project","Builder","BuilderUID","ERPID",
+  "Address","AreaSectorColony","City","State","PIN","Mobile2","Email","Aadhaar","PAN","Project","Builder","BuilderUID",...(COMPANY.key === "trpl" ? (["ERPID"] as const) : ([] as const)),
   "UnitNo","PaymentPlan","Branch","BBA Status","Area","BSPPSF","InaugralDiscountPSF","NPVDiscountPSF","SchemeDiscountPSF",
   "FormRevisedPSF","AgreementRevisedPSF","PaymentPlanDiscountPSF","OnFormDiscountPSF","NetBSPPSF","PLCPSF","IFMSPSF",
   "PowerBackupPSF","SinkingFundClubPSF","OtherChargesPSF","TotalChargesPSF","TotalCostPSF","TotalCostAmt","GST","TCWithGST",
@@ -89,7 +89,7 @@ export const SLAB_COLUMNS: { key: string; label: string }[][] = [
 export const VIEW_SECTIONS: { title: string; keys: string[]; columns?: { key: string; label: string }[][] }[] = [
   { title: "Booking", keys: ["BkgID","BkgMonth","BkgLoginDate","FormStatus","SourceOfLead","PropertyType","Emp","Director","Branch","BBA Status","RC/RA","CalcBasis","SIFStatus","WorkingRemarks","ExpectedCollectionDate"] },
   { title: "Client", keys: ["Client","CoApplicant","ContactNo","Mobile2","Email","Address","AreaSectorColony","City","State","PIN","Aadhaar","PAN"] },
-  { title: "Project / Unit", keys: ["Project","Builder","ProjectLocation","UnitNo","BuilderUID","ERPID","Area","PaymentPlan"] },
+  { title: "Project / Unit", keys: ["Project","Builder","ProjectLocation","UnitNo","BuilderUID",COMPANY.key === "trpl" ? "ERPID" : "","Area","PaymentPlan"] },
   { title: "Costing details", keys: [], columns: COSTING_COLUMNS },
   { title: "Broker details", keys: ["BrokerName","BrokerAmt","CreditNoteAmt"] },
   { title: "Slabs & revenue", columns: SLAB_COLUMNS, keys: ["SlabRemarks","UnitAdj","RA%","CoRevRA","RAAchievePertenage"] },
