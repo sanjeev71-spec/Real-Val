@@ -14,7 +14,7 @@ export default async function BulkExpPage() {
         <Link className="link text-sm" href="/bulk">Bulk upload bookings</Link>
       </div>
       <div className="card space-y-2 text-sm">
-        <p>Master only. Lines go straight into Exp — no approval step. One row is one Exp line: rows with the same <b>DocNo</b> become one document, rows with a blank DocNo are one document each and are numbered automatically.</p>
+        <p>Master only. Lines go straight into Exp — no approval step. One row is one Exp line. To make one transaction of several rows, type the same label in the <b>Group</b> column on those rows: they are saved as one document with an automatic number and lines -01, -02 … Rows without a Group are one document each.</p>
         <p>The same checks as the Exp form apply (head, mode, Chq / UTR details, BkgID, Emp, duplicate cheques). Nothing is saved unless every row passes. Up to 500 rows per file.</p>
         <div className="flex flex-wrap gap-2 pt-1">
           <a className="btn" href="/api/template/exp?format=xlsx">Download Excel template (with instructions)</a>

@@ -50,12 +50,12 @@ export function BulkExpUpload() {
         <div className="card overflow-x-auto">
           <p className="mb-2 text-sm">{rows.length} line(s) in {docs} document(s) — <b className={bad.length ? "text-red-700" : "text-green-700"}>{bad.length ? `${bad.length} line(s) with errors` : "all lines OK"}</b></p>
           <table className="table">
-            <thead><tr><th>Row</th><th>DocNo</th><th>Pay date</th><th>Head</th><th>Mode</th><th>R/P</th><th className="text-right">Gross</th><th>Chq / UTR</th><th>BkgID</th><th>Emp</th><th>Problems</th></tr></thead>
+            <thead><tr><th>Row</th><th>Document</th><th>Pay date</th><th>Head</th><th>Mode</th><th>R/P</th><th className="text-right">Gross</th><th>Chq / UTR</th><th>BkgID</th><th>Emp</th><th>Problems</th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.row} className={Object.keys(r.errors).length ? "bg-red-50" : ""}>
                   <td>{r.row}</td>
-                  <td>{r.docNo || "auto"}</td>
+                  <td>{r.doc || "auto number"}</td>
                   <td>{fmtDate(r.line.payDate)}</td>
                   <td>{String(r.line.head ?? "")}</td>
                   <td>{String(r.line.mode ?? "")}</td>

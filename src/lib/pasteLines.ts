@@ -5,6 +5,7 @@ export const PASTE_DEFAULT_ORDER = ["head", "rp", "gross", "gst", "tds", "bkgId"
 
 const ALIASES: Record<string, string> = {
   head: "head", "exp head": "head",
+  group: "group", "group id": "group", groupid: "group", txn: "group", "txn id": "group", transaction: "group", "merge key": "group", "link id": "group",
   docno: "docNo", "doc no": "docNo", "document no": "docNo", "doc number": "docNo",
   "r/p": "rp", rp: "rp", type: "rp", "receipt/payment": "rp",
   mode: "mode",
