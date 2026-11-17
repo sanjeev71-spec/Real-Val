@@ -20,7 +20,7 @@ export default async function Changes({ searchParams }: { searchParams: Promise<
   const shown = rows.filter((r) => (user.role === "master" || r.c.requestedBy === user.id) && (status === "all" || r.c.status === status));
   return (
     <div className="space-y-4">
-      <h1 className="h1">Exp & Emp changes</h1>
+      <h1 className="h1">Exp, Emp & Bkg changes</h1>
       <div className="flex flex-wrap gap-2">
         {["pending", "approved", "rejected", "all"].map((st) => (
           <Link key={st} className={`btn capitalize ${status === st ? "btn-primary" : ""}`} href={`/changes?status=${st}`}>{st}</Link>

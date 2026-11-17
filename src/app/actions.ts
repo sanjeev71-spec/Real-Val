@@ -12,7 +12,8 @@ import { and, eq } from "drizzle-orm";
 import { normEmail, requestOtp, requireUser, signOut, verifyOtp, type Role } from "@/lib/auth";
 import { getDb, schema as s } from "@/lib/db";
 import * as wf from "@/lib/workflow";
-import { checkRows, commitRows, parseUpload, type BulkRow } from "@/lib/bulk";
+import { parseUpload } from "@/lib/bulk";
+import { checkBkgUpload, type BkgUploadCounts, type BkgUploadRow } from "@/lib/bkgUpload";
 import { checkExpUpload, type ExpBulkCounts, type ExpBulkRow } from "@/lib/bulkExp";
 
 // ---- sign-in
@@ -78,23 +79,28 @@ async function readFile(form: FormData) {
   if (f.size > 5_000_000) throw new Error("File is larger than 5 MB");
   return { name: f.name, rows: await parseUpload(f.name, await f.arrayBuffer()) };
 }
-export async function bulkCheckAction(form: FormData): Promise<{ ok: boolean; message?: string; rows?: BulkRow[]; unknownColumns?: string[]; fileName?: string }> {
-  await requireUser(["master"]);
+// ---- Bkg upload: add new bookings and / or correct existing ones (Master applies at once, Admin needs Master approval)
+const bkgOpts = (form: FormData) => ({ allowAdd: form.get("allowAdd") === "1", allowUpdate: form.get("allowUpdate") === "1" });
+export async function bkgUploadCheckAction(form: FormData): Promise<{ ok: boolean; message?: string; rows?: BkgUploadRow[]; warnings?: string[]; counts?: BkgUploadCounts }> {
+  await requireUser(["admin", "master"]);
   try {
-    const { name, rows } = await readFile(form);
-    const res = await checkRows(rows);
-    return { ok: true, ...res, fileName: name };
+    const { rows } = await readFile(form);
+    const res = await checkBkgUpload(rows, bkgOpts(form));
+    return { ok: true, rows: res.rows, warnings: res.warnings, counts: res.counts };
   } catch (e) {
     return { ok: false, message: (e as Error).message };
   }
 }
-export async function bulkCommitAction(form: FormData) {
-  const user = await requireUser(["master"]);
+export async function bkgUploadCommitAction(form: FormData): Promise<{ ok: boolean; message?: string; applied?: boolean; id?: number; counts?: BkgUploadCounts }> {
+  const user = await requireUser(["admin", "master"]);
   try {
     const { name, rows } = await readFile(form);
-    const res = await commitRows(rows, user, name);
-    if (res.ok) revalidatePath("/", "layout");
-    return res.ok ? { ok: true, ids: res.ids } : { ok: false, message: "Some rows have errors — check again." };
+    const res = await checkBkgUpload(rows, bkgOpts(form));
+    if (res.rows.some((r) => Object.keys(r.errors).length)) return { ok: false, message: "Some rows have errors - check again." };
+    const r = await ch.requestBkgUpload(user, { fileName: name, creates: res.creates, updates: res.updates });
+    if (!r.ok) return { ok: false, message: r.message ?? "Could not save." };
+    revalidatePath("/", "layout");
+    return { ok: true, applied: r.applied ?? false, id: r.id, counts: res.counts };
   } catch (e) {
     return { ok: false, message: (e as Error).message };
   }

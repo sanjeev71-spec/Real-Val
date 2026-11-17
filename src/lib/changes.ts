@@ -9,6 +9,7 @@ import type { User } from "./auth";
 import { COMPANY } from "./company";
 import { resyncEmployees } from "./empSync";
 import { lineDocNo, splitDocNo, validDocBase } from "./docNo";
+import { applyBkgUpload, type BkgUploadData } from "./bkgUpload";
 
 type Tx = Parameters<Parameters<DB["transaction"]>[0]>[0];
 export type Errors = Record<string, string>;
@@ -22,7 +23,7 @@ const isDate = (v: unknown) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.te
 const toNum = (v: unknown) => (v === "" || v === null || v === undefined ? null : Number(String(v).replace(/[,\s]/g, "")));
 const txt = (v: unknown) => (v === null || v === undefined || String(v).trim() === "" ? null : String(v).trim());
 
-export const ENTITY_LABEL: Record<string, string> = { exp: "Exp", emp: "Emp" };
+export const ENTITY_LABEL: Record<string, string> = { exp: "Exp", emp: "Emp", bkg: "Bkg" };
 export const ACTION_LABEL: Record<string, string> = {
   create: "New entry", update: "Edit", delete: "Delete", create_doc: "New document", update_doc: "Edit document", delete_doc: "Delete document", bulk_upload: "Upload (add / update)", merge_docs: "Merge entries into one document", split_line: "Split a line into its own document", change: "Effective change", correct: "Correct details", exit: "Exit",
 };
@@ -455,6 +456,17 @@ export async function requestExpUpload(user: User, data: ExpUploadData, before: 
   }
 }
 
+/** Bkg upload: Master applies at once, Admin waits for Master approval. One all-or-nothing change in the log. */
+export async function requestBkgUpload(user: User, data: BkgUploadData): Promise<ChangeResult> {
+  if (user.role !== "admin" && user.role !== "master") return { ok: false, errors: {}, message: "Only Admin or Master can upload Bkg." };
+  if (!data.creates.length && !data.updates.length) return { ok: false, errors: {}, message: "Nothing to add or change in this file." };
+  try {
+    return await submit(user, "bkg", "bulk_upload", null, data as unknown as Record<string, unknown>, null);
+  } catch (e) {
+    return { ok: false, errors: {}, message: (e as Error).message };
+  }
+}
+
 // =================================================================== merge entries into one document / split a line out
 
 export const MERGE_MIN = 2;
@@ -534,11 +546,16 @@ async function applySplit(tx: Tx, d: { lineId?: number }): Promise<string> {
 
 // =================================================================== shared request / approval
 
-async function submit(user: User, entity: "exp" | "emp", action: string, targetId: number | null, data: Record<string, unknown>, before: Record<string, unknown> | null): Promise<ChangeResult> {
+async function applyEntity(tx: Tx, entity: string, action: string, targetId: number | null, data: Record<string, unknown>, userId: number, before: Record<string, unknown> | null) {
+  if (entity === "bkg") return applyBkgUpload(tx, data as unknown as BkgUploadData, userId);
+  return entity === "exp" ? applyExp(tx, action, targetId, data as ExpData, userId, before) : applyEmp(tx, action, data);
+}
+
+async function submit(user: User, entity: "exp" | "emp" | "bkg", action: string, targetId: number | null, data: Record<string, unknown>, before: Record<string, unknown> | null): Promise<ChangeResult> {
   const db = await getDb();
   if (user.role === "master") {
     const ref = await db.transaction(async (tx) => {
-      const ref = entity === "exp" ? await applyExp(tx, action, targetId, data as ExpData, user.id, before) : await applyEmp(tx, action, data);
+      const ref = await applyEntity(tx, entity, action, targetId, data, user.id, before);
       await tx.insert(s.changeRequests).values({
         entity, action, targetId, data, before, status: "approved", requestedBy: user.id, decidedBy: user.id, decidedAt: new Date(), resultRef: ref, comment: "Done directly by Master",
       });
@@ -552,7 +569,7 @@ async function submit(user: User, entity: "exp" | "emp", action: string, targetI
 }
 
 function summary(entity: string, action: string, d: Record<string, unknown>) {
-  if (action === "bulk_upload") return `Upload ${esc(d.fileName)} — ${(d.creates as unknown[] | undefined)?.length ?? 0} new document(s), ${(d.updates as unknown[] | undefined)?.length ?? 0} changed line(s)`;
+  if (action === "bulk_upload") return `Upload ${esc(d.fileName)} — ${(d.creates as unknown[] | undefined)?.length ?? 0} new ${entity === "bkg" ? "booking(s)" : "document(s)"}, ${(d.updates as unknown[] | undefined)?.length ?? 0} changed ${entity === "bkg" ? "booking(s)" : "line(s)"}`;
   if (entity === "exp" && Array.isArray(d.lines)) {
     const ls = d.lines as ExpDocLine[];
     const net = ls.reduce((a, l) => a + (l.rp === "Receipt" ? 1 : -1) * (Number(l.gross) || 0), 0);
@@ -580,7 +597,7 @@ export async function decideChange(user: User, id: number, approve: boolean, com
   let ref: string | null = null;
   try {
     await db.transaction(async (tx) => {
-      if (approve) ref = cr.entity === "exp" ? await applyExp(tx, cr.action, cr.targetId, cr.data as ExpData, cr.requestedBy, cr.before ?? null) : await applyEmp(tx, cr.action, cr.data);
+      if (approve) ref = await applyEntity(tx, cr.entity, cr.action, cr.targetId, cr.data, cr.requestedBy, cr.before ?? null);
       await tx.update(s.changeRequests).set({ status: approve ? "approved" : "rejected", decidedBy: user.id, decidedAt: new Date(), comment: comment || null, resultRef: ref }).where(eq(s.changeRequests.id, id));
     });
   } catch (err) {

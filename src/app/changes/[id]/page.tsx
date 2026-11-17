@@ -32,6 +32,8 @@ export default async function ChangePage({ params }: { params: Promise<{ id: str
   const LINE_COLS = ["docNo", "head", "rp", "mode", "gross", "gst", "tds", "bkgId", "emp", "payDate", "narration", "instrNo", "paymentMode"];
   const creates = Array.isArray(d.creates) ? (d.creates as { docBase: string | null; lines: Record<string, unknown>[] }[]) : [];
   const updates = Array.isArray(d.updates) ? (d.updates as { id: number; docNo: string; changes: { field: string; from: unknown; to: unknown }[] }[]) : [];
+  const bkgUpdates = Array.isArray(d.updates) && cr.entity === "bkg" ? (d.updates as { bkgId: string; changes: { field: string; from: unknown; to: unknown }[] }[]) : [];
+  const BKG_COLS = ["BkgLoginDate", "Client", "Project", "UnitNo", "Emp", "FormStatus", "BSPPSF", "Builder"];
   const nudgeWait = cr.lastNudgeAt ? Math.max(0, NUDGE_HOURS * 3600_000 - (Date.now() - cr.lastNudgeAt.getTime())) : 0;
 
   return (
@@ -52,7 +54,38 @@ export default async function ChangePage({ params }: { params: Promise<{ id: str
 
       <ChangeDecision id={cr.id} isMaster={user.role === "master" && cr.status === "pending"} isRequester={cr.requestedBy === user.id && cr.status === "pending"} nudgeWaitMs={nudgeWait} />
 
-      {cr.action === "bulk_upload" && (
+      {cr.action === "bulk_upload" && cr.entity === "bkg" && (
+        <>
+          <div className="card text-sm">File <b>{String(d.fileName ?? "")}</b>: {creates.length} new booking(s) · {bkgUpdates.length} existing booking(s) changed. It is applied as one change, or not at all.</div>
+          {bkgUpdates.length > 0 && (
+            <section className="card overflow-x-auto">
+              <h2 className="h2">Existing bookings to change ({bkgUpdates.length})</h2>
+              <table className="table">
+                <thead><tr><th>BkgID</th><th>Field</th><th>Before</th><th>After</th></tr></thead>
+                <tbody>
+                  {bkgUpdates.flatMap((u) => u.changes.map((c, i) => (
+                    <tr key={`${u.bkgId}-${c.field}`} className="bg-amber-50">
+                      <td>{i === 0 ? u.bkgId : ""}</td><td className="text-[var(--muted)]">{c.field}</td><td>{show(c.from)}</td><td className="font-medium">{show(c.to)}</td>
+                    </tr>
+                  )))}
+                </tbody>
+              </table>
+            </section>
+          )}
+          {creates.length > 0 && (
+            <section className="card overflow-x-auto">
+              <h2 className="h2">New bookings ({creates.length})</h2>
+              <table className="table">
+                <thead><tr>{BKG_COLS.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+                <tbody>
+                  {(creates as unknown as Record<string, unknown>[]).map((b, i) => <tr key={i} className="bg-green-50">{BKG_COLS.map((c) => <td key={c}>{show(b[c])}</td>)}</tr>)}
+                </tbody>
+              </table>
+            </section>
+          )}
+        </>
+      )}
+      {cr.action === "bulk_upload" && cr.entity === "exp" && (
         <>
           <div className="card text-sm">File <b>{String(d.fileName ?? "")}</b>: {creates.length} new document(s) · {updates.length} existing line(s) changed. It is applied as one change, or not at all.</div>
           {updates.length > 0 && (
