@@ -12,11 +12,8 @@ export default async function BookingPage({ params }: { params: Promise<{ bkgId:
   if (!row || (user.role === "sales" && row.Emp !== user.empCode)) notFound();
   return (
     <div className="space-y-4">
-      <h1 className="h1 !text-base leading-snug sm:!text-lg">
-        Booking {String(row.BkgID)} — {String(row.Client ?? "")}
-        <span className="block text-sm font-normal text-[var(--muted)] sm:ml-3 sm:inline">
-          {[row.Builder, row.Project, row.UnitNo ? `Unit ${String(row.UnitNo)}` : ""].map((x) => String(x ?? "").trim()).filter(Boolean).join(" · ")}
-        </span>
+      <h1 className="h1 overflow-x-auto whitespace-nowrap !text-base font-bold leading-snug sm:!text-[17px]">
+        {[row.BkgID, row.Client, row.Builder, row.Project, row.UnitNo].map((x) => String(x ?? "").trim()).filter(Boolean).join(" ~ ")}
       </h1>
       <BookingView row={row} />
     </div>

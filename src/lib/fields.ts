@@ -90,7 +90,7 @@ const ERP = COMPANY.key === "trpl" ? "ERPID" : ""; // RealV has no ERPID: its ce
 export const VIEW_SECTIONS: { title: string; keys: string[]; columns?: { key: string; label: string }[][] }[] = [
   { title: "Booking", keys: ["BkgID",ERP,"SourceOfLead","BkgMonth","BkgLoginDate","PropertyType","Director","Emp","Branch","FormStatus","SIFStatus","ExpectedCollectionDate","RC/RA","BBA Status","WorkingRemarks"] },
   { title: "Client", keys: ["Client","Email","Address","CoApplicant","Aadhaar","AreaSectorColony","ContactNo","PAN","City","Mobile2","PIN","State"] },
-  { title: "Project / Unit", keys: ["Project","Builder","ProjectLocation","UnitNo","BuilderUID",ERP,"Area","PaymentPlan"] },
+  { title: "Project / Unit", keys: ["Project","Builder","ProjectLocation","UnitNo","BuilderUID","","Area","PaymentPlan"] },
   { title: "Costing details", keys: [], columns: COSTING_COLUMNS },
   { title: "Broker details", keys: ["BrokerName","BrokerAmt","CreditNoteAmt"] },
   { title: "Slabs & revenue", columns: SLAB_COLUMNS, keys: ["SlabRemarks","UnitAdj","RA%","CoRevRA","RAAchievePertenage"] },

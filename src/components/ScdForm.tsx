@@ -115,6 +115,7 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
 
       <Section title="Booking">
         {txt("BkgLoginDate", "Date of booking", { type: "date", req: true })}
+        {COMPANY.key === "trpl" && txt("ERPID", "ERP ID")}
         <Field k="FormStatus" label="Form status" req errors={errors}>
           <select id="FormStatus" className="input" value={String(d.FormStatus ?? "Not Live")} onChange={(e) => set("FormStatus", e.target.value)}>
             {FORM_STATUSES.map((o) => <option key={o}>{o}</option>)}
@@ -161,7 +162,7 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
           </select>
         </Field>
         {txt("BuilderUID", "Builder UID")}
-        {COMPANY.key === "trpl" ? txt("ERPID", "ERP ID") : <div className="hidden md:block" />}
+        <div className="hidden md:block" />
         {num("Area", "Area (sq ft)", true)}
         {txt("PaymentPlan", "Payment plan", { ro: true })}
         </div>
