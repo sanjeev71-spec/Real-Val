@@ -86,14 +86,15 @@ export const SLAB_COLUMNS: { key: string; label: string }[][] = [
  * Read-only booking view. A section shows `columns` (vertical groups side by side) first, then `keys` in a grid.
  * In `keys`, "" is an empty cell so the three-column grid lines up as on the SCD sheet.
  */
+const ERP = COMPANY.key === "trpl" ? "ERPID" : ""; // RealV has no ERPID: its cell stays empty
 export const VIEW_SECTIONS: { title: string; keys: string[]; columns?: { key: string; label: string }[][] }[] = [
-  { title: "Booking", keys: ["BkgID","BkgMonth","BkgLoginDate","FormStatus","SourceOfLead","PropertyType","Emp","Director","Branch","BBA Status","RC/RA","CalcBasis","SIFStatus","WorkingRemarks","ExpectedCollectionDate"] },
-  { title: "Client", keys: ["Client","CoApplicant","ContactNo","Mobile2","Email","Address","AreaSectorColony","City","State","PIN","Aadhaar","PAN"] },
-  { title: "Project / Unit", keys: ["Project","Builder","ProjectLocation","UnitNo","BuilderUID",COMPANY.key === "trpl" ? "ERPID" : "","Area","PaymentPlan"] },
+  { title: "Booking", keys: ["BkgID",ERP,"SourceOfLead","BkgMonth","BkgLoginDate","PropertyType","Director","Emp","Branch","FormStatus","SIFStatus","ExpectedCollectionDate","RC/RA","BBA Status","WorkingRemarks"] },
+  { title: "Client", keys: ["Client","Email","Address","CoApplicant","Aadhaar","AreaSectorColony","ContactNo","PAN","City","Mobile2","PIN","State"] },
+  { title: "Project / Unit", keys: ["Project","Builder","ProjectLocation","UnitNo","BuilderUID",ERP,"Area","PaymentPlan"] },
   { title: "Costing details", keys: [], columns: COSTING_COLUMNS },
   { title: "Broker details", keys: ["BrokerName","BrokerAmt","CreditNoteAmt"] },
   { title: "Slabs & revenue", columns: SLAB_COLUMNS, keys: ["SlabRemarks","UnitAdj","RA%","CoRevRA","RAAchievePertenage"] },
   { title: "Incentives", keys: ["DirectorSplRevenue","SpinToWin","IncentivePOC","IncentiveRV","IncentiveBuilder"] },
-  { title: "Receipts & dues", keys: ["SPD","ChqAmt","TotalRecdAmt","Recd%","Recoverable","FormRevised","RecdFromClient","BuilderDep","CommRecd","RecdNOC","CommBilled","TotRecd","PendDue","FutDue","OverRecd","BillGSTTDS","RecdAgtBill","BillOS"] },
+  { title: "Receipts & dues", keys: ["SPD","FormRevised","PendDue","ChqAmt","RecdFromClient","FutDue","TotalRecdAmt","BuilderDep","OverRecd","Recd%","CommRecd","BillGSTTDS","CalcBasis","RecdNOC","RecdAgtBill","Recoverable","CommBilled","BillOS","","TotRecd"] },
   { title: "Revenue share", keys: ["RS_ChainCodes","RS_Depth",...[0,1,2,3,4].flatMap((k)=>[`L${k}_Emp`,`L${k}_Share%`,`L${k}_Share`,`L${k}_SharexRA`]),"Override_Emp","Override_Share%","Override_Share","Override_SharexRA"] },
 ];
