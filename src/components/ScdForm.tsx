@@ -161,7 +161,7 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
           </select>
         </Field>
         {txt("BuilderUID", "Builder UID")}
-        <div className="hidden md:block" />
+        {txt("ERPID", "ERP ID")}
         {num("Area", "Area (sq ft)", true)}
         {txt("PaymentPlan", "Payment plan", { ro: true })}
         </div>
