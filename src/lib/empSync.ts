@@ -4,7 +4,7 @@
 // One change to one Emp row can alter the Director of other people (their head's period moved), so every
 // change recomputes all rows and writes back only the ones whose values changed. Open periods run to today, so
 // they are also refreshed once a day (ensureEmpDerived).
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, sql } from "drizzle-orm";
 import { getDb, schema as s, type DB } from "./db";
 import { Hierarchy } from "./calc/hierarchy";
 import { computeEmp } from "./calc/emp";
@@ -26,7 +26,7 @@ export async function resyncEmployees(db: Db): Promise<number> {
       changeDateFrom: ser(r.changeDateFrom)!, changeDateTo: r.changeDateTo === null ? OPEN_END : ser(r.changeDateTo)!,
     })),
   );
-  let changed = 0;
+  const pending: { id: number; director: string | null; chainPath: string | null; daysWorked: number; manMonths: number; seatCost: number; derivedOn: string }[] = [];
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     const from = ser(r.changeDateFrom)!;
@@ -45,14 +45,24 @@ export async function resyncEmployees(db: Db): Promise<number> {
       seatCost: c.seatCost,
       derivedOn: todayIso(),
     };
+    // the "computed on" date only matters for open periods (they are refreshed daily) and rows never computed
+    const stamp = r.changeDateTo === null || r.derivedOn === null ? r.derivedOn === next.derivedOn : true;
     const same =
       r.director === next.director && r.chainPath === next.chainPath && r.daysWorked === next.daysWorked &&
-      r.manMonths === next.manMonths && r.seatCost === next.seatCost && r.derivedOn === next.derivedOn;
+      r.manMonths === next.manMonths && r.seatCost === next.seatCost && stamp;
     if (same) continue;
-    await db.update(s.employees).set(next).where(eq(s.employees.id, r.id));
-    changed++;
+    pending.push({ id: r.id, ...next });
   }
-  return changed;
+  // written back in a few big statements (one statement per row timed out on a full Emp table)
+  for (let i = 0; i < pending.length; i += 400) {
+    const vals = sql.join(
+      pending.slice(i, i + 400).map((x) => sql`(${x.id}::int, ${x.director}::text, ${x.chainPath}::text, ${x.daysWorked}::int, ${x.manMonths}::float8, ${x.seatCost}::float8, ${x.derivedOn}::date)`),
+      sql`, `,
+    );
+    await db.execute(sql`update employees e set director = v.director, chain_path = v.chain_path, days_worked = v.dw, man_months = v.mm, seat_cost = v.sc, derived_on = v.d
+      from (values ${vals}) as v(id, director, chain_path, dw, mm, sc, d) where e.id = v.id`);
+  }
+  return pending.length;
 }
 
 /** Refreshes the derived columns when any row has never been computed or an open period was last computed before today. */
