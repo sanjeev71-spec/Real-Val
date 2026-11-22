@@ -219,11 +219,26 @@ async function empRows() {
   return db.select().from(s.employees).orderBy(asc(s.employees.seq));
 }
 
-export async function requestEmp(user: User, action: "create" | "change" | "correct" | "exit", raw: Record<string, unknown>): Promise<ChangeResult> {
-  if (user.role !== "hr" && user.role !== "master") return { ok: false, errors: {}, message: "Only HR or Master can change Emp." };
+export type EmpAction = "create" | "change" | "correct" | "exit";
+type EmpDbRow = typeof s.employees.$inferSelect;
+export interface EmpCtx { rows: EmpDbRow[]; current: EmpDbRow[]; names: Set<string> }
+
+export async function empCtx(): Promise<EmpCtx> {
   const rows = await empRows();
-  const current = currentPeriods(rows);
-  const names = new Set(rows.map((r) => r.emp));
+  return { rows, current: currentPeriods(rows), names: new Set(rows.map((r) => r.emp)) };
+}
+
+export async function requestEmp(user: User, action: EmpAction, raw: Record<string, unknown>): Promise<ChangeResult> {
+  if (user.role !== "hr" && user.role !== "master") return { ok: false, errors: {}, message: "Only HR or Master can change Emp." };
+  const b = buildEmp(action, raw, await empCtx());
+  if (b.notFound) return { ok: false, errors: { code: "Employee not found" } };
+  if (Object.keys(b.errors).length) return { ok: false, errors: b.errors };
+  return submit(user, "emp", action, (b.data.periodId as number) ?? null, b.data, b.before);
+}
+
+/** Checks one Emp change (form or upload row) and builds what will be applied. Shared so both follow the same rules. */
+export function buildEmp(action: EmpAction, raw: Record<string, unknown>, ctx: EmpCtx): { data: Record<string, unknown>; before: Record<string, unknown> | null; errors: Errors; notFound?: boolean } {
+  const { rows, current, names } = ctx;
   const e: Errors = {};
   let data: Record<string, unknown> = {};
   let before: Record<string, unknown> | null = null;
@@ -256,7 +271,7 @@ export async function requestEmp(user: User, action: "create" | "change" | "corr
   if (action === "change" || action === "correct" || action === "exit") {
     const code = txt(raw.code);
     const cur = current.find((r) => codeOf(r.emp).toLowerCase() === str(code).toLowerCase());
-    if (!cur) return { ok: false, errors: { code: "Employee not found" } };
+    if (!cur) return { data: {}, before: null, errors: { code: "Employee not found" }, notFound: true };
     before = cur as never;
     if (action === "change") {
       const eff = parseDate(raw.effectiveFrom ?? "");
@@ -296,8 +311,42 @@ export async function requestEmp(user: User, action: "create" | "change" | "corr
       data = { code: codeOf(cur.emp), emp: cur.emp, periodId: cur.id, exitDate, reassign: plan };
     }
   }
-  if (Object.keys(e).length) return { ok: false, errors: e };
-  return submit(user, "emp", action, (data.periodId as number) ?? null, data, before);
+  return { data, before, errors: e };
+}
+
+/** Emp upload: one all-or-nothing change. HR waits for Master approval; Master applies at once. */
+export interface EmpUploadItem { row: number; action: EmpAction; data: Record<string, unknown> }
+export async function requestEmpUpload(user: User, fileName: string, items: EmpUploadItem[]): Promise<ChangeResult> {
+  if (user.role !== "hr" && user.role !== "master") return { ok: false, errors: {}, message: "Only HR or Master can upload Emp." };
+  if (!items.length) return { ok: false, errors: {}, message: "Nothing to add or change in this file." };
+  try {
+    return await submit(user, "emp", "bulk_upload", null, { fileName, items } as never, null);
+  } catch (e) {
+    return { ok: false, errors: {}, message: (e as Error).message };
+  }
+}
+
+export function empUploadCounts(items: EmpUploadItem[] = []) {
+  const n = (a: string) => items.filter((i) => i.action === a).length;
+  return `${n("create")} new employee(s), ${n("change")} history change(s), ${n("correct")} correction(s), ${n("exit")} exit(s)`;
+}
+
+/** Applies upload rows in a safe order: new employees, then changes and corrections, then exits. */
+async function applyEmpUpload(tx: Tx, d: { items: EmpUploadItem[] }): Promise<string> {
+  const order: Record<string, number> = { create: 0, change: 1, correct: 1, exit: 2 };
+  const items = [...d.items].sort((a, b) => order[a.action] - order[b.action] || a.row - b.row);
+  for (const it of items) {
+    if (it.action === "exit") {
+      // a reportee may have got a new period earlier in this file: move whoever still reports to the leaver, using their open period now
+      const plan: { emp: string; periodId: number; newHead: string }[] = [];
+      for (const r of (it.data.reassign as { emp: string; newHead: string }[]) ?? []) {
+        const [open] = await tx.select().from(s.employees).where(and(eq(s.employees.emp, r.emp), sql`${s.employees.changeDateTo} is null`));
+        if (open && open.reportingHead === it.data.emp) plan.push({ emp: r.emp, periodId: open.id, newHead: r.newHead });
+      }
+      await applyEmpAction(tx, "exit", { ...it.data, reassign: plan });
+    } else await applyEmpAction(tx, it.action, it.data);
+  }
+  return `${d.items.length} row(s)`;
 }
 
 async function nextSeq(tx: Tx) {
@@ -310,6 +359,12 @@ async function splitPeriod(tx: Tx, periodId: number, to: string, changes: Record
   const [cur] = await tx.select().from(s.employees).where(eq(s.employees.id, periodId));
   if (!cur) throw new Error("Employee period no longer exists");
   if (cur.changeDateTo !== null) throw new Error(`${cur.emp} is no longer in an open period`);
+  // the open period already starts after `to` (e.g. a change from the 1st, then their manager exits on the 30th):
+  // apply the new values to that period itself instead of closing it before it starts
+  if (addDays(to, 1) <= cur.changeDateFrom) {
+    await tx.update(s.employees).set(changes as never).where(eq(s.employees.id, periodId));
+    return;
+  }
   await tx.update(s.employees).set({ changeDateTo: to, exitDate: to }).where(eq(s.employees.id, periodId));
   const { id: _id, seq: _seq, ...copy } = cur;
   await tx.insert(s.employees).values({ ...copy, ...(changes as Record<string, unknown>), seq: await nextSeq(tx), changeDateFrom: addDays(to, 1), changeDateTo: null, exitDate: null } as never);
@@ -323,6 +378,7 @@ async function applyEmp(tx: Tx, action: string, d: Record<string, unknown>): Pro
 }
 
 async function applyEmpAction(tx: Tx, action: string, d: Record<string, unknown>): Promise<string> {
+  if (action === "bulk_upload") return applyEmpUpload(tx, d as unknown as { items: EmpUploadItem[] });
   if (action === "create") {
     const { emp, ...f } = d as Record<string, never>;
     await tx.insert(s.employees).values({ ...(f as object), emp, seq: await nextSeq(tx), changeDateFrom: (d.doj as string), changeDateTo: null } as never);
@@ -661,6 +717,7 @@ async function submit(user: User, entity: "exp" | "emp" | "bkg", action: string,
 }
 
 function summary(entity: string, action: string, d: Record<string, unknown>) {
+  if (action === "bulk_upload" && entity === "emp") return `Emp upload ${esc(d.fileName)} — ${empUploadCounts(d.items as EmpUploadItem[])}`;
   if (action === "bulk_upload") return `Upload ${esc(d.fileName)} — ${(d.creates as unknown[] | undefined)?.length ?? 0} new ${entity === "bkg" ? "booking(s)" : "document(s)"}, ${(d.updates as unknown[] | undefined)?.length ?? 0} changed ${entity === "bkg" ? "booking(s)" : "line(s)"}`;
   if (entity === "exp" && Array.isArray(d.lines)) {
     const ls = d.lines as ExpDocLine[];

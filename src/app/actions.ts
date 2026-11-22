@@ -154,6 +154,7 @@ export async function saveUserAction(input: { id?: number; email: string; name: 
 
 // ---- Exp / Emp change requests
 import * as ch from "@/lib/changes";
+import { checkEmpUpload, type EmpUploadRow } from "@/lib/empUpload";
 
 export async function expRequestAction(action: "create" | "update" | "delete", data: Record<string, unknown>, targetId?: number) {
   const user = await requireUser(["admin", "master"]);
@@ -397,6 +398,32 @@ export async function bkgEditAction(bkgId: string, data: Record<string, unknown>
     if (!out.ok) return { ok: false, message: out.message ?? "Could not save." };
     revalidatePath("/", "layout");
     return { ok: true, applied: out.applied ?? false, id: out.id };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+
+// ---- Emp upload: new employees, history changes, corrections and exits (Master applies at once, HR needs Master approval)
+export async function empUploadCheckAction(form: FormData): Promise<{ ok: boolean; message?: string; rows?: EmpUploadRow[]; warnings?: string[] }> {
+  await requireUser(["hr", "master"]);
+  try {
+    const { rows } = await readFile(form);
+    const res = await checkEmpUpload(rows);
+    return { ok: true, rows: res.rows, warnings: res.warnings };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+export async function empUploadCommitAction(form: FormData): Promise<{ ok: boolean; message?: string; applied?: boolean; id?: number; count?: number }> {
+  const user = await requireUser(["hr", "master"]);
+  try {
+    const { name, rows } = await readFile(form);
+    const res = await checkEmpUpload(rows);
+    if (res.rows.some((r) => Object.keys(r.errors).length)) return { ok: false, message: "Some rows have errors - check again." };
+    const r = await ch.requestEmpUpload(user, name, res.items);
+    if (!r.ok) return { ok: false, message: r.message ?? "Could not save." };
+    revalidatePath("/", "layout");
+    return { ok: true, applied: r.applied ?? false, id: r.id, count: res.items.length };
   } catch (e) {
     return { ok: false, message: (e as Error).message };
   }

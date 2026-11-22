@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { currentUser } from "@/lib/auth";
 import { employeesWithCalc } from "@/lib/data";
+import { CALC_COLOUR, FILL_COLOUR } from "@/lib/expLayout";
 
 export const dynamic = "force-dynamic";
 
@@ -32,8 +33,23 @@ export async function GET() {
       const v = f(r);
       return [h, dateCols.has(h) && typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00Z`) : v ?? null];
     })));
-  ws.getRow(1).font = { bold: true };
+  // Headings: light green = typed by hand, light grey = derived by the system (same colours as the Bkg and Exp downloads)
+  const derived = new Set(["ManMonths", "SeatCost", "Director", "ChangeDateFrom", "ChangeDateTo", "DOExit/Change", "DaysWorked", "Key"]);
+  const hdr = ws.getRow(1);
+  hdr.font = { bold: true };
+  cols.forEach(([h], i) => { hdr.getCell(i + 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: derived.has(h) ? CALC_COLOUR : FILL_COLOUR } }; });
   ws.views = [{ state: "frozen", ySplit: 1 }];
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
+  const help = wb.addWorksheet("Legend");
+  [
+    ["HOW TO READ THIS FILE"],
+    ["Light green headings = entered by hand (on the Emp forms or the Emp upload)."],
+    ["Light grey headings = derived by the system: Director, history dates (ChangeDateFrom / ChangeDateTo / DOExit-Change), days worked, man-months, seat cost, key."],
+    ["One row per history period of each employee. To add employees or history rows, use the Emp upload template (Emp > Upload Emp) - this download is not uploaded as it is."],
+  ].forEach((r) => help.addRow(r));
+  help.getRow(2).getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: FILL_COLOUR } };
+  help.getRow(3).getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CALC_COLOUR } };
+  help.getColumn(1).width = 150;
   return new Response(await wb.xlsx.writeBuffer(), {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

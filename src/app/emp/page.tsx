@@ -20,6 +20,7 @@ export default async function EmpList({ searchParams }: { searchParams: Promise<
         <h1 className="h1">Employees (Emp)</h1>
         <span className="text-sm text-[var(--muted)]">{shown.length} shown</span>
         <a className="btn ml-auto" href="/api/export/emp">Download Emp (.xlsx)</a>
+        <Link className="btn" href="/bulk/emp">Upload Emp (template)</Link>
         <Link className="btn btn-primary" href="/emp/new">+ New employee</Link>
       </div>
       <form className="flex flex-wrap items-center gap-2">

@@ -26,7 +26,7 @@ export default async function ChangePage({ params }: { params: Promise<{ id: str
   const d = cr.data as Record<string, unknown>;
   const before = (cr.before ?? {}) as Record<string, unknown>;
   const after: Record<string, unknown> = cr.entity === "emp" && d.changes ? (d.changes as Record<string, unknown>) : d;
-  const keys = Object.keys(after).filter((k) => !HIDE.has(k) && k !== "changes" && k !== "reassign" && k !== "lines" && k !== "creates" && k !== "updates" && k !== "fileName" && (canSeePII || !PII.has(k)));
+  const keys = Object.keys(after).filter((k) => !HIDE.has(k) && k !== "changes" && k !== "reassign" && k !== "lines" && k !== "creates" && k !== "updates" && k !== "fileName" && k !== "items" && (canSeePII || !PII.has(k)));
   const lines = Array.isArray(d.lines) ? (d.lines as Record<string, unknown>[]) : null;
   const beforeLines = Array.isArray(before.lines) ? (before.lines as Record<string, unknown>[]) : [];
   const LINE_COLS = ["docNo", "head", "rp", "mode", "gross", "gst", "tds", "bkgId", "emp", "payDate", "narration", "instrNo", "paymentMode"];
@@ -34,6 +34,22 @@ export default async function ChangePage({ params }: { params: Promise<{ id: str
   const updates = Array.isArray(d.updates) ? (d.updates as { id: number; docNo: string; changes: { field: string; from: unknown; to: unknown }[] }[]) : [];
   const bkgUpdates = Array.isArray(d.updates) && cr.entity === "bkg" ? (d.updates as { bkgId: string; changes: { field: string; from: unknown; to: unknown }[] }[]) : [];
   const BKG_COLS = ["BkgLoginDate", "Client", "Project", "UnitNo", "Emp", "FormStatus", "BSPPSF", "Builder"];
+  const empItems = cr.entity === "emp" && Array.isArray(d.items) ? (d.items as { row: number; action: string; data: Record<string, unknown> }[]) : [];
+  const EMP_ACTION: Record<string, string> = { create: "New", change: "Change", correct: "Correct", exit: "Exit" };
+  const pick = (o: Record<string, unknown>) =>
+    Object.entries(o)
+      .filter(([k, v]) => v !== null && v !== "" && !HIDE.has(k) && k !== "emp" && (canSeePII || !PII.has(k)))
+      .map(([k, v]) => `${k}: ${String(v)}`)
+      .join(" · ");
+  const empDetail = (it: { action: string; data: Record<string, unknown> }) => {
+    const x = it.data;
+    const ch = (x.changes ?? {}) as Record<string, unknown>;
+    if (it.action === "create") return pick(x);
+    if (it.action === "change") return `from ${String(x.effectiveFrom)} · ${pick(ch)}`;
+    if (it.action === "correct") return pick(ch);
+    const moves = (x.reassign as { emp: string; newHead: string }[] | undefined) ?? [];
+    return `exit on ${String(x.exitDate)}${moves.length ? ` · reportees: ${moves.map((m) => `${m.emp} → ${m.newHead}`).join(", ")}` : ""}`;
+  };
   const nudgeWait = cr.lastNudgeAt ? Math.max(0, NUDGE_HOURS * 3600_000 - (Date.now() - cr.lastNudgeAt.getTime())) : 0;
 
   return (
@@ -53,6 +69,20 @@ export default async function ChangePage({ params }: { params: Promise<{ id: str
       )}
 
       <ChangeDecision id={cr.id} isMaster={user.role === "master" && cr.status === "pending"} isRequester={cr.requestedBy === user.id && cr.status === "pending"} nudgeWaitMs={nudgeWait} />
+
+      {cr.action === "bulk_upload" && cr.entity === "emp" && (
+        <section className="card overflow-x-auto">
+          <h2 className="h2">Emp upload {String(d.fileName ?? "")} — {empItems.length} row(s), applied as one change or not at all</h2>
+          <table className="table">
+            <thead><tr><th>Row</th><th>Action</th><th>Employee</th><th>Details</th></tr></thead>
+            <tbody>
+              {empItems.map((it) => (
+                <tr key={it.row}><td>{it.row}</td><td>{EMP_ACTION[it.action] ?? it.action}</td><td>{String(it.data.emp ?? "")}</td><td className="text-xs">{empDetail(it)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
 
       {cr.action === "bulk_upload" && cr.entity === "bkg" && (
         <>
