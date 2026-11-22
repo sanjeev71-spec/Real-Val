@@ -41,6 +41,7 @@ export interface ExpCtx {
   /** File upload: a BLANK Head, Emp, Mode, date, amount or cheque detail is saved as it is and shown in the Data exception remarks (not rejected). */
   lenient: boolean;
   bkgEmp: Map<string, string | null>; // BkgID -> Emp of the booking (only bookings that exist)
+  bkgProject: Map<string, string | null>; // BkgID -> Project of the booking
   instr: Map<string, { id: number; docNo: string | null; instrDate: string | null; gross: number | null; rp: string | null }[]>; // lower(Chq/UTR no) -> stored entries
 }
 const low = (v: unknown) => str(v as never).toLowerCase();
@@ -53,10 +54,13 @@ export async function buildExpCtx(lines: Record<string, unknown>[]): Promise<Exp
   const instrNos = [...new Set(lines.map((l) => txt(l.instrNo)?.toLowerCase()).filter((x): x is string => !!x))];
   const chunk = <T,>(a: T[], n = 500) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n));
   const [heads, modes] = await Promise.all([expHeadList(), activeModes()]);
-  const ctx: ExpCtx = { heads: new Set(heads.map((h) => h.head.toLowerCase())), modes: new Set(modes.map((m) => m.toLowerCase())), emps: new Set(), bkgEmp: new Map(), instr: new Map(), lenient: true };
+  const ctx: ExpCtx = { heads: new Set(heads.map((h) => h.head.toLowerCase())), modes: new Set(modes.map((m) => m.toLowerCase())), emps: new Set(), bkgEmp: new Map(), bkgProject: new Map(), instr: new Map(), lenient: true };
   for (const c of chunk(bkgIds)) {
     const r = await db.select({ id: s.bookings.bkgId, data: s.bookings.data }).from(s.bookings).where(inArray(s.bookings.bkgId, c));
-    for (const b of r) ctx.bkgEmp.set(b.id, ((b.data as Record<string, unknown>).Emp as string) ?? null);
+    for (const b of r) {
+      ctx.bkgEmp.set(b.id, ((b.data as Record<string, unknown>).Emp as string) ?? null);
+      ctx.bkgProject.set(b.id, txt((b.data as Record<string, unknown>).Project));
+    }
   }
   // Emp of a booking is looked up too (it is the default Emp)
   const allEmps = [...new Set([...emps, ...[...ctx.bkgEmp.values()].filter((x): x is string => !!x)])];
@@ -132,13 +136,17 @@ export async function normalizeExp(raw: Record<string, unknown>, selfId?: number
   if (d.bkgId) {
     let found = false;
     let bEmp: string | null = null;
-    if (ctx) { found = ctx.bkgEmp.has(str(d.bkgId)); bEmp = ctx.bkgEmp.get(str(d.bkgId)) ?? null; }
+    let bProject: string | null = null;
+    if (ctx) { found = ctx.bkgEmp.has(str(d.bkgId)); bEmp = ctx.bkgEmp.get(str(d.bkgId)) ?? null; bProject = ctx.bkgProject.get(str(d.bkgId)) ?? null; }
     else {
       const [b] = await db.select({ data: s.bookings.data }).from(s.bookings).where(eq(s.bookings.bkgId, str(d.bkgId)));
-      found = !!b; bEmp = b ? ((b.data.Emp as string) ?? null) : null;
+      found = !!b; bEmp = b ? ((b.data.Emp as string) ?? null) : null; bProject = b ? txt(b.data.Project) : null;
     }
     if (!found) e.bkgId = "No booking with this BkgID";
-    else if (!d.emp) d.emp = bEmp; // default the Emp from the booking
+    else {
+      if (!d.emp) d.emp = bEmp; // blank Emp = the booking's Emp (a typed Emp is kept)
+      if (!d.project) d.project = bProject; // blank Project = the booking's Project
+    }
   }
   if (!d.emp) { if (!soft) e.emp = "Choose the employee"; }
   else if (ctx) {

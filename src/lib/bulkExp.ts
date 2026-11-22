@@ -141,6 +141,7 @@ export async function checkExpUpload(raw: Record<string, unknown>[], opts: ExpBu
     if (r.docNo) r.errors.docNo = "Leave DocNo blank on a row that is added to an existing document";
     const n = await normalizeExp(r.line, null, ctx);
     Object.assign(r.errors, n.errors);
+    r.line = { ...r.line, ...(n.data as PastedLine) }; // show the Emp / Project filled from the booking
     const a = adds.get(base) ?? { lines: [], rows: [] };
     a.lines.push(n.data); a.rows.push(r); adds.set(base, a);
   }
@@ -171,6 +172,7 @@ export async function checkExpUpload(raw: Record<string, unknown>[], opts: ExpBu
       if (m) g[Number(m[1])].errors[m[2]] = v;
       else g[0].errors[k === "lines" ? "docNo" : k] = v;
     }
+    g.forEach((r, j) => { if (n.data.lines[j]) r.line = { ...r.line, ...(n.data.lines[j] as PastedLine) }; }); // show the Emp / Project filled from the booking
     creates.push(n.data);
   }
 
@@ -209,7 +211,7 @@ export async function expTemplateXlsx(): Promise<Buffer> {
     ["TO CORRECT EXISTING LINES: download the Exp list (or a Data exceptions check) from the site, change the green cells, and upload that file as it is. A row whose DocNo is an existing line is a correction of that line (DocNo identifies the line - do not change it). An entry that shows no DocNo in the list is identified by the number shown in its place (its row id) - keep that number in DocNo."],
     ["Blank cells keep the stored value. To empty a field on purpose, type [clear] in the cell. Calculated columns of the download (ExpType, SignedGross, Client, Director, Data Exception Remarks, Rcv_..., L0/L1 ...) are ignored."],
     ["You can mix corrections and new transactions in one file. Uploading does not delete anything."],
-    [`Required for new rows: PayDate, Head, Mode, R/P, Gross, and Emp (Emp is taken from the booking when BkgID is filled). Up to ${EXP_BULK_MAX} rows per upload.`],
+    [`Required for new rows: PayDate, Head, Mode, R/P, Gross, and Emp. When BkgID is filled, a blank Emp and a blank Project are taken from the booking (type an Emp to use a different one). Up to ${EXP_BULK_MAX} rows per upload.`],
     ["Dates: dd-mm-yyyy or yyyy-mm-dd. ValueDate defaults to PayDate. R/P: Receipt or Payment (a negative Gross is read as a Payment of that amount)."],
     ["Mode = Chq lines also need Purpose, PaymentMode (Cheque, RTGS, UPI...), Chq/UTR No and Chq/UTR Date. For other modes those columns are ignored."],
     ["BkgID must exist in Bkg. Emp must match the Emp sheet exactly, e.g. Name~Code. RelatedEmpName is free text (a note such as a builder or 'Need Detail')."],
