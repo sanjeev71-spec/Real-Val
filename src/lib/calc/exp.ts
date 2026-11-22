@@ -28,6 +28,7 @@ export interface ExpInput {
   instrDate?: string | number | null;
   chqBank?: string | null;
   relatedEmpName?: string | null;
+  expMonth?: string | null; // typed month (yyyy-mm); blank = from PayDate
 }
 
 export interface BookingRef {
@@ -99,7 +100,7 @@ export function computeExp(e: ExpInput, ctx: ExpContext): ExpRow {
     DocNo: e.docNo,
     PayDate: serialToIso(pay),
     ValueDate: serialToIso(d),
-    ExpMonth: pay === null ? "" : (serialToIso(pay) ?? "").slice(0, 7),
+    ExpMonth: e.expMonth || (pay === null ? "" : (serialToIso(pay) ?? "").slice(0, 7)),
     ExpType: expType,
     Head: e.head,
     Mode: e.mode,

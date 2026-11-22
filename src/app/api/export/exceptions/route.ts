@@ -1,7 +1,8 @@
 import { currentUser } from "@/lib/auth";
 import { getDb, schema as s } from "@/lib/db";
 import { loadCore } from "@/lib/data";
-import { findExceptions } from "@/lib/calc/exceptions";
+import { exceptionRemarks, findExceptions } from "@/lib/calc/exceptions";
+import { storedExpFields } from "@/lib/expRemarks";
 import { XLSX_TYPE, bkgWorkbook, expWorkbook, stampDate } from "@/lib/excelExport";
 
 export const dynamic = "force-dynamic";
@@ -18,9 +19,10 @@ export async function GET(req: Request) {
     db.selectDistinct({ emp: s.employees.emp }).from(s.employees),
     db.select({ head: s.expHeads.head }).from(s.expHeads),
   ]);
-  const g = findExceptions(bk as never, exps as never, new Set(emps.map((e) => e.emp)), new Set(heads.map((h) => h.head.toLowerCase()))).find((x) => x.key === key);
+  const groups = findExceptions(bk as never, exps as never, new Set(emps.map((e) => e.emp)), new Set(heads.map((h) => h.head.toLowerCase())));
+  const g = groups.find((x) => x.key === key);
   if (!g) return new Response("No such check (or nothing to download any more)", { status: 404 });
-  const body = g.kind === "bkg" ? await bkgWorkbook(g.rows) : await expWorkbook(g.rows);
+  const body = g.kind === "bkg" ? await bkgWorkbook(g.rows) : await expWorkbook(g.rows, exceptionRemarks(groups), await storedExpFields());
   return new Response(body, {
     headers: { "Content-Type": XLSX_TYPE, "Content-Disposition": `attachment; filename="${g.kind === "bkg" ? "Bkg" : "Exp"}-exceptions-${key}-${stampDate()}.xlsx"` },
   });

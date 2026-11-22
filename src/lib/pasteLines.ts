@@ -16,6 +16,8 @@ const ALIASES: Record<string, string> = {
   project: "project", narration: "narration", remarks: "remarks", remark: "remarks",
   "pay date": "payDate", paydate: "payDate", date: "payDate", "value date": "valueDate", valuedate: "valueDate",
   branch: "branch",
+  "related emp name": "relatedEmpName", relatedempname: "relatedEmpName", "related employee": "relatedEmpName", "related emp": "relatedEmpName",
+  expmonth: "expMonth", "exp month": "expMonth",
   purpose: "purpose", paymentmode: "paymentMode", "payment mode": "paymentMode",
   bank: "chqBank", "bank name": "chqBank", bankname: "chqBank",
   "chq / utr no": "instrNo", "chq/utr no": "instrNo", "chq no": "instrNo", "utr no": "instrNo", utr: "instrNo", "instr no": "instrNo",
@@ -46,6 +48,19 @@ export function parsePasteDate(v: string): string | null {
   const dt = new Date(Date.UTC(y, mo - 1, d));
   if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
   return dt.toISOString().slice(0, 10);
+}
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+/** yyyy-mm, mm-yyyy, Oct-2026, October 2026, Oct-26, or any full date -> yyyy-mm (null when it cannot be read). */
+export function parsePasteMonth(v: string): string | null {
+  const t = v.trim();
+  const ym = (y: number, m: number) => (m >= 1 && m <= 12 && y >= 1990 && y <= 2100 ? `${y}-${String(m).padStart(2, "0")}` : null);
+  let m = /^(\d{4})[-/.](\d{1,2})$/.exec(t);
+  if (m) return ym(+m[1], +m[2]);
+  if ((m = /^(\d{1,2})[-/.](\d{4})$/.exec(t))) return ym(+m[2], +m[1]);
+  if ((m = /^([A-Za-z]{3})[A-Za-z]*[-\s/.,']*(\d{2}|\d{4})$/.exec(t))) { const mo = MONTHS.indexOf(m[1].toLowerCase()); const y = +m[2]; return mo < 0 ? null : ym(y < 100 ? 2000 + y : y, mo + 1); }
+  const d = parsePasteDate(t);
+  return d ? d.slice(0, 7) : null;
 }
 
 function parseRp(v: string): string | null {
@@ -81,6 +96,9 @@ export function parsePaste(text: string, maxLines = 300): PasteResult {
       } else if (DATES.has(k)) {
         const d = parsePasteDate(raw);
         if (d) line[k] = d; else warnings.push(`Line ${rowNo}: "${raw}" is not a date`);
+      } else if (k === "expMonth") {
+        const mth = parsePasteMonth(raw);
+        if (mth) line[k] = mth; else warnings.push(`Line ${rowNo}: "${raw}" is not a month for ExpMonth (use yyyy-mm, e.g. 2026-10)`);
       } else if (k === "rp") {
         const p = parseRp(raw);
         if (p) line[k] = p; else warnings.push(`Line ${rowNo}: R/P "${raw}" should be Receipt or Payment`);

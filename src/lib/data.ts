@@ -199,13 +199,19 @@ export async function expContext() {
 export const expInputOf = (e: typeof s.expEntries.$inferSelect): ExpInput => ({
   docNo: e.docNo, payDate: e.payDate, valueDate: e.valueDate, head: e.head, mode: e.mode, narration: e.narration, rp: e.rp,
   gross: e.gross, gst: e.gst, tds: e.tds, branch: e.branch, emp: e.emp, bkgId: e.bkgId, project: e.project, remarks: e.remarks,
-  purpose: e.purpose, paymentMode: e.paymentMode, instrNo: e.instrNo, instrDate: e.instrDate, chqBank: e.chqBank, relatedEmpName: e.relatedEmpName,
+  purpose: e.purpose, paymentMode: e.paymentMode, instrNo: e.instrNo, instrDate: e.instrDate, chqBank: e.chqBank, relatedEmpName: e.relatedEmpName, expMonth: e.expMonth,
 });
 
-/** Every Exp entry with its calculated columns, latest pay date first (entries without a date last). */
+/** Every Exp entry with its calculated columns, latest pay date first (entries without a date last); the lines of a document are kept together. */
 async function expWithCalcRaw(): Promise<(ExpComputedRow & { id: number })[]> {
   const db = await getDb();
-  const [rows, ctx] = await Promise.all([db.select().from(s.expEntries).orderBy(sql`${s.expEntries.payDate} desc nulls last`, desc(s.expEntries.id)), expContext()]);
+  const [rows, ctx] = await Promise.all([db.select().from(s.expEntries).orderBy(
+    sql`${s.expEntries.payDate} desc nulls last`,
+    // the lines of one document stay together (an old line and the lines added to it later are not scattered by their ids); documents still newest first
+    sql`max(${s.expEntries.id}) over (partition by coalesce(${s.expEntries.docBase}, ${s.expEntries.docNo}, ${s.expEntries.id}::text)) desc`,
+    sql`${s.expEntries.lineNo} asc nulls first`,
+    asc(s.expEntries.id),
+  ), expContext()]);
   return rows.map((e) => ({ id: e.id, ...computeExp(expInputOf(e), ctx) }));
 }
 
@@ -248,7 +254,7 @@ export async function expFormData() {
   return {
     heads: heads.map((h) => ({ head: h.head, type: h.type })),
     modes,
-    projects: projects.map((p) => p.name),
+    projects: [...new Set(projects.map((p) => p.name))],
     chqLists: await chqLists(),
   };
 }

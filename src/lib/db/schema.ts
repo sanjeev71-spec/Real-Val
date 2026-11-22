@@ -98,6 +98,7 @@ export const expEntries = pgTable("exp_entries", {
   remarks: text("remarks"),
   emp: text("emp"), // "Name~Code"; defaults from the booking, can be changed
   relatedEmpName: text("related_emp_name"),
+  expMonth: text("exp_month"), // yyyy-mm typed on upload; blank = taken from PayDate
   // cheque / UTR details (used when Mode = Chq)
   purpose: text("purpose"),
   paymentMode: text("payment_mode"),
@@ -133,11 +134,13 @@ export const changeRequests = pgTable("change_requests", {
   decidedAt: timestamp("decided_at", { withTimezone: true }),
 }, (t) => [index("cr_status_idx").on(t.status)]);
 
+// One row per project: its Builder and Location.
 export const projects = pgTable("projects", {
-  name: text("name").primaryKey(),
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
   location: text("location"),
   builder: text("builder"),
-});
+}, (t) => [uniqueIndex("projects_name_uq").on(t.name)]);
 
 export const inventory = pgTable("inventory", {
   id: serial("id").primaryKey(),

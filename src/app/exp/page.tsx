@@ -29,6 +29,7 @@ export default async function ExpList({ searchParams }: { searchParams: Promise<
         <h1 className="h1">Exp</h1>
         <span className="text-sm text-[var(--muted)]">{matched.length.toLocaleString("en-IN")} of {all.length.toLocaleString("en-IN")} lines · latest pay date first</span>
         <a className="btn ml-auto" href={exportHref}>Download Excel{filtered ? " (this search)" : ""}</a>
+        <a className="btn" href={`${exportHref}${filtered ? "&" : ""}exc=1`} title="Only the entries with a data exception (missing Head, BkgID, date, amount ...), ready to complete and upload">Download entries to complete</a>
         <Link className="btn btn-primary" href="/exp/new">+ New document</Link>
       </div>
 

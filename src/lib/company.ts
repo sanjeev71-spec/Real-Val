@@ -23,21 +23,23 @@ export interface Company {
   /** true = GST is a typed amount on the booking (blank = 0), not a calculated column. */
   gstManual: boolean;
   defaultPartners: string[];
+  /** true = Project, Unit, Builder, Area and the price-list fields are typed on the booking (masters only suggest them). */
+  manualMasters: boolean;
 }
 
 const COMPANIES: Record<Company["key"], Company> = {
   realv: {
     key: "realv", name: "Realty Vault", legalName: "Realty Vault Pvt. Ltd.", form: "SCD", formLong: "Sale Confirmation Dossier",
-    idPrefix: "RV", idDigits: 4, topCode: "200001", empCompany: "RV", idExample: "RV0001", gstRate: 0.12, gstManual: false,
+    idPrefix: "RV", idDigits: 4, topCode: "200001", empCompany: "RV", idExample: "RV0001", gstRate: 0.12, gstManual: false, manualMasters: false,
     defaultPartners: ["Pratham Goyal~100031", "Pawan Bedi~200001", "Tarun Kumar~100030", "Aditya Goel~200002"],
   },
   trpl: {
     key: "trpl", name: "Truevisory Realty", legalName: "Truevisory Realty Pvt. Ltd.", form: "SIF", formLong: "Sales Information Form",
-    idPrefix: "TRPL", idDigits: 4, topCode: "TV0022", empCompany: "Truevisory Realty Pvt Ltd", idExample: "TRPL5200", gstRate: 0, gstManual: true,
+    idPrefix: "TRPL", idDigits: 4, topCode: "TV0022", empCompany: "Truevisory Realty Pvt Ltd", idExample: "TRPL5200", gstRate: 0, gstManual: true, manualMasters: true,
     defaultPartners: ["Aman Jain~TV0022"],
   },
 };
 
 const key = (process.env.NEXT_PUBLIC_COMPANY === "trpl" ? "trpl" : "realv") as Company["key"];
 export const COMPANY: Company = COMPANIES[key];
-export const idPattern = new RegExp(`^${COMPANY.idPrefix}\d{${COMPANY.idDigits},}$`);
+export const idPattern = new RegExp(`^${COMPANY.idPrefix}\\d{${COMPANY.idDigits},}$`);

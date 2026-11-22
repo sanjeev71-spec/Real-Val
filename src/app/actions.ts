@@ -124,7 +124,7 @@ export async function bulkExpCommitAction(form: FormData): Promise<{ ok: boolean
     const { name, rows } = await readFile(form);
     const res = await checkExpUpload(rows, expOpts(form));
     if (res.rows.some((r) => Object.keys(r.errors).length)) return { ok: false, message: "Some rows have errors - check again." };
-    const r = await ch.requestExpUpload(user, { fileName: name, creates: res.creates, updates: res.updates }, res.before);
+    const r = await ch.requestExpUpload(user, { fileName: name, creates: res.creates, updates: res.updates, adds: res.adds, merges: res.merges }, res.before);
     if (!r.ok) return { ok: false, message: r.message ?? "Could not save." };
     revalidatePath("/", "layout");
     return { ok: true, applied: r.applied ?? false, id: r.id, counts: res.counts };
@@ -296,4 +296,108 @@ export async function splitExpLineAction(lineId: number) {
   const r = await ch.requestSplit(user, lineId);
   if (r.ok) revalidatePath("/", "layout");
   return r;
+}
+
+// ---- Project / Inventory / Price list masters (TRPL; Admin and Master, applied at once - they only suggest values on a booking)
+import { applyMasterUpload, checkMasterUpload, deleteMasterRow, saveMasterRow, seedProjectsFromBkg, syncBookingsToProjects, type MasterCheck, type MasterCheckRow } from "@/lib/masterData";
+import { isMasterKind } from "@/lib/masterDefs";
+
+type MasterCheckRes = { ok: boolean; message?: string; rows?: MasterCheckRow[]; warnings?: string[]; counts?: MasterCheck["counts"]; applied?: boolean };
+let masterUserId = 0;
+async function masterGuard(kind: string) {
+  masterUserId = (await requireUser(["admin", "master"])).id;
+  if (!isMasterKind(kind)) throw new Error("Unknown master");
+  return kind;
+}
+export async function masterRowSaveAction(kind: string, id: string | null, input: Record<string, unknown>) {
+  try {
+    const k = await masterGuard(kind);
+    const uid = masterUserId;
+    const r = await saveMasterRow(k, id, input);
+    if (r.ok && k === "projects") {
+      const n = (await syncBookingsToProjects(uid, "Project Master: " + String(input.name ?? ""))).bookings;
+      if (n) r.message = n + " booking(s) updated with the new Builder / Location.";
+    }
+    if (r.ok) revalidatePath("/", "layout");
+    return r;
+  } catch (e) {
+    return { ok: false, message: (e as Error).message } as { ok: boolean; errors?: Record<string, string>; message?: string };
+  }
+}
+export async function masterRowDeleteAction(kind: string, id: string) {
+  try {
+    const k = await masterGuard(kind);
+    await deleteMasterRow(k, id);
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+export async function masterUploadAction(kind: string, form: FormData, commit: boolean): Promise<MasterCheckRes> {
+  try {
+    const k = await masterGuard(kind);
+    const { rows } = await readFile(form);
+    const res = await checkMasterUpload(k, rows);
+    const out = { ok: true, rows: res.rows, warnings: res.warnings, counts: res.counts };
+    if (!commit) return out;
+    if (res.rows.some((r) => Object.keys(r.errors).length)) return { ...out, ok: false, message: "Some rows have errors - check again." };
+    if (!res.creates.length && !res.updates.length) return { ...out, ok: false, message: "Nothing to add or change in this file." };
+    const uid = masterUserId;
+    await applyMasterUpload(k, res);
+    let message: string | undefined;
+    if (k === "projects") {
+      const n = (await syncBookingsToProjects(uid, "Project Master upload")).bookings;
+      if (n) message = n + " booking(s) updated with the new Builder / Location.";
+    }
+    revalidatePath("/", "layout");
+    return { ...out, applied: true, message };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+export async function syncBookingsAction() {
+  try {
+    await masterGuard("projects");
+    const n = (await syncBookingsToProjects(masterUserId, "Project Master applied to all bookings")).bookings;
+    revalidatePath("/", "layout");
+    return { ok: true, bookings: n };
+  } catch (e) {
+    return { ok: false, bookings: 0, message: (e as Error).message };
+  }
+}
+export async function projectsFromBkgAction() {
+  try {
+    await masterGuard("projects");
+    const r = await seedProjectsFromBkg(); // one time only
+    revalidatePath("/", "layout");
+    return { ok: true, ...r };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+
+// ---- Edit one booking on the form (Master saves at once; Admin's change goes to Master for approval)
+import { editRow } from "@/lib/bkgUpload";
+import { normalize } from "@/lib/validate";
+export async function bkgEditAction(bkgId: string, data: Record<string, unknown>): Promise<{ ok: boolean; applied?: boolean; id?: number; errors?: Record<string, string>; message?: string }> {
+  const user = await requireUser(["admin", "master"]);
+  try {
+    const db = await getDb();
+    const [b] = await db.select().from(s.bookings).where(eq(s.bookings.bkgId, bkgId));
+    if (!b) return { ok: false, message: "Booking not found." };
+    const stored = normalize(b.data as Record<string, unknown>);
+    const form = normalize(data);
+    const row = editRow(b.bkgId, stored, form);
+    const res = await checkBkgUpload([row], { allowAdd: false, allowUpdate: true });
+    const r = res.rows[0];
+    if (Object.keys(r.errors).length) return { ok: false, errors: r.errors, message: "Please fix the highlighted fields: " + Object.entries(r.errors).map(([k, v]) => `${k}: ${v}`).join(" · ") };
+    if (!res.updates.length) return { ok: false, message: "Nothing was changed." };
+    const out = await ch.requestBkgUpload(user, { fileName: `Edit of ${b.bkgId} on the form`, creates: [], updates: res.updates });
+    if (!out.ok) return { ok: false, message: out.message ?? "Could not save." };
+    revalidatePath("/", "layout");
+    return { ok: true, applied: out.applied ?? false, id: out.id };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
 }

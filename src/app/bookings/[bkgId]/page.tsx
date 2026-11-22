@@ -7,14 +7,19 @@ import { BookingView } from "@/components/BookingView";
 
 export const dynamic = "force-dynamic";
 
-export default async function BookingPage({ params }: { params: Promise<{ bkgId: string }> }) {
+export default async function BookingPage({ params, searchParams }: { params: Promise<{ bkgId: string }>; searchParams: Promise<{ saved?: string }> }) {
   const user = await requireUser(["master", "admin", "sales"]);
   const { bkgId } = await params;
+  const saved = (await searchParams).saved === "1";
   const row = (await computedBookings()).find((r) => String(r.BkgID).toUpperCase() === decodeURIComponent(bkgId).toUpperCase());
   if (!row || (user.role === "sales" && row.Emp !== user.empCode)) notFound();
   const history = user.role === "sales" ? null : await bkgHistory(String(row.BkgID));
   return (
     <div className="space-y-4">
+      {saved && <div className="card border-green-300 bg-green-50 text-sm">Saved - the change is logged under Exp/Emp/Bkg approvals.</div>}
+      {user.role !== "sales" && (
+        <div className="flex justify-end"><Link className="btn btn-primary" href={`/bookings/${encodeURIComponent(String(row.BkgID))}/edit`}>Edit this booking</Link></div>
+      )}
       <h1 className="h1 overflow-x-auto whitespace-nowrap !text-base font-bold leading-snug sm:!text-[17px]">
         {[row.BkgID, row.Client, row.Builder, row.Project, row.UnitNo].map((x) => String(x ?? "").trim()).filter(Boolean).join(" ~ ")}
       </h1>
@@ -22,7 +27,7 @@ export default async function BookingPage({ params }: { params: Promise<{ bkgId:
       {history && (
         <section className="card overflow-x-auto">
           <h2 className="h2">History of this booking</h2>
-          {history.length === 0 ? <p className="text-sm text-[var(--muted)]">No upload has changed this booking.</p> : (
+          {history.length === 0 ? <p className="text-sm text-[var(--muted)]">No change has been made to this booking through the system (upload or form edit).</p> : (
             <table className="table">
               <thead><tr><th>When</th><th>What</th><th>By</th><th>Decision</th><th>Comment</th><th></th></tr></thead>
               <tbody>

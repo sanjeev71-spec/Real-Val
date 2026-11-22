@@ -4,7 +4,8 @@ import Papa from "papaparse";
 import { inArray, eq, sql } from "drizzle-orm";
 import { getDb, schema as s, type DB } from "./db";
 import { loadMasters } from "./data";
-import { applyLookups, type FormData } from "./masters";
+import { applyLookups, employeeNames, type FormData } from "./masters";
+import { convertBackOffice, isBackOffice } from "./bkgBackOffice";
 import { normalize, validateBooking, type Errors } from "./validate";
 import { BKG_COLUMNS, BKG_INPUT_KEYS, FORM_STATUSES, NEW_BOOKING_DEFAULTS, NUMBER_KEYS, PROPERTY_TYPES, SOLD_STATUSES, SOURCES_OF_LEAD } from "./fields";
 import { insertBookings } from "./workflow";
@@ -41,7 +42,24 @@ export const valKey = (k: string, v: unknown): string => {
 };
 const isSold = (v: unknown) => SOLD_STATUSES.includes(str(v as never));
 
-export async function checkBkgUpload(raw: Row[], opts: BkgUploadOpts): Promise<BkgUploadCheck> {
+/** project|unit (lower case) of every Live / Not Live booking in Bkg. */
+async function occupiedUnits(db: Awaited<ReturnType<typeof getDb>>): Promise<Set<string>> {
+  const r = await db.select({ k: sql<string>`lower(trim(${s.bookings.data}->>'Project'))||'|'||lower(trim(${s.bookings.data}->>'UnitNo'))` }).from(s.bookings).where(inArray(sql`${s.bookings.data}->>'FormStatus'`, SOLD_STATUSES));
+  return new Set(r.map((x) => x.k));
+}
+
+export async function checkBkgUpload(rawIn: Row[], opts: BkgUploadOpts): Promise<BkgUploadCheck> {
+  const masters = await loadMasters();
+  const db = await getDb();
+  let raw = rawIn;
+  const preWarnings: string[] = [];
+  let rowNo = new WeakMap<object, number>();
+  if (COMPANY.manualMasters && isBackOffice(rawIn)) {
+    const erps = [...new Set(rawIn.map((r) => str(r["Booking Trpl Id"] as never).toUpperCase()).filter(Boolean))];
+    const have = erps.length ? await db.select({ id: s.bookings.bkgId, erp: sql<string>`upper(${s.bookings.data}->>'ERPID')` }).from(s.bookings).where(inArray(sql`upper(${s.bookings.data}->>'ERPID')`, erps)) : [];
+    const c = convertBackOffice(rawIn, employeeNames(masters), new Map(have.map((h) => [h.erp, h.id])), await occupiedUnits(db));
+    raw = c.rows; rowNo = c.rowNo; preWarnings.push(...c.warnings);
+  }
   const headers = [...new Set(raw.flatMap((r) => Object.keys(r)))].filter(Boolean);
   const known = new Set<string>(BKG_COLUMNS as readonly string[]);
   const unknown = headers.filter((h) => !known.has(h));
@@ -49,12 +67,10 @@ export async function checkBkgUpload(raw: Row[], opts: BkgUploadOpts): Promise<B
   if (!src.length) throw new Error("No rows found in the file.");
   if (!headers.includes("BkgID") && !headers.includes("Client")) throw new Error("The first row must hold the column names (see the template).");
   const used = src.slice(0, BKG_UPLOAD_MAX);
-  const warnings: string[] = [];
+  const warnings: string[] = [...preWarnings];
   if (src.length > BKG_UPLOAD_MAX) warnings.push(`Only the first ${BKG_UPLOAD_MAX} rows are read per upload (${src.length} in the file). Upload the rest in another file.`);
   if (unknown.length) warnings.push(`These columns are not Bkg columns and are ignored: ${unknown.join(", ")}`);
 
-  const masters = await loadMasters();
-  const db = await getDb();
   const typedIds = [...new Set(used.map((r) => str(r.BkgID as never).toUpperCase()).filter(Boolean))];
   const found = typedIds.length ? await db.select().from(s.bookings).where(inArray(sql`upper(${s.bookings.bkgId})`, typedIds)) : [];
   const existingBy = new Map(found.map((b) => [b.bkgId.toUpperCase(), b]));
@@ -73,7 +89,7 @@ export async function checkBkgUpload(raw: Row[], opts: BkgUploadOpts): Promise<B
       const v = r[h];
       if (typeof v === "string" && v.trim().toLowerCase() === "[clear]") { clears.add(h); cleaned[h] = null; } else cleaned[h] = v;
     }
-    const out: BkgUploadRow = { row: i + 2, kind: "new", bkgId: id, data: {}, changes: [], errors: {} };
+    const out: BkgUploadRow = { row: rowNo.get(r) ?? i + 2, kind: "new", bkgId: id, data: {}, changes: [], errors: {} };
     rows.push(out);
     if (id) {
       if (seenIds.has(id)) out.errors.BkgID = "Duplicate BkgID in this file";
@@ -144,6 +160,16 @@ export async function applyBkgUpload(tx: Tx, d: BkgUploadData, userId: number): 
   return `${ids.length} new · ${(d.updates ?? []).length} changed`;
 }
 
+/** The one-row upload that a form edit stands for: the form's values, with [clear] where a stored value was emptied. */
+export function editRow(bkgId: string, stored: FormData, form: FormData): Row {
+  const row: Row = { BkgID: bkgId };
+  for (const k of BKG_INPUT_KEYS) {
+    if (k === "BkgID") continue;
+    if (blank(form[k])) { if (!blank(stored[k])) row[k] = "[clear]"; } else row[k] = form[k];
+  }
+  return row;
+}
+
 export async function bkgTemplateXlsx(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Bookings");
@@ -151,6 +177,7 @@ export async function bkgTemplateXlsx(): Promise<Buffer> {
   const example: Record<string, string | number> = {
     BkgLoginDate: "20-10-2026", FormStatus: "Not Live", SourceOfLead: "Company Lead", PropertyType: "Studio",
     Emp: "Employee~Code", Client: "Example Client", ContactNo: "9800000000", Project: "Project name", UnitNo: "1403",
+    ...(COMPANY.manualMasters ? { Builder: "Builder name", ProjectLocation: "Sector, City", Area: 1000, BSPPSF: 5000, OtherChargesPSF: 0, PaymentPlan: "40-30-30", DSlab: 0, DSlabType: "" } : {}),
     OnFormDiscountPSF: 0, BrokerName: "", BrokerAmt: 0,
   };
   ws.addRow(BKG_TEMPLATE_COLUMNS.map((c) => example[c] ?? ""));
@@ -164,7 +191,7 @@ export async function bkgTemplateXlsx(): Promise<Buffer> {
     ["Required for a new booking: BkgLoginDate, Emp, Client, Project, UnitNo, FormStatus."],
     [`BkgID: leave blank to auto-generate (${COMPANY.idExample}...). Type one only to keep an ID from another system.`],
     ["Dates: dd-mm-yyyy or yyyy-mm-dd. BkgMonth defaults to BkgLoginDate."],
-    ["Blank cells of a NEW booking are filled automatically: Builder/ProjectLocation (Project), Area (Inventory), BSPPSF/OtherChargesPSF/PaymentPlan/DSlab/DSlabType (Price List on the booking date), Branch (Associate's Emp row on the booking date)."],
+    ...(COMPANY.manualMasters ? [["Project MUST exist in the Project Master (Admin > Projects) - a row with any other project is rejected with the reason; add the project there first. Builder and ProjectLocation: leave them blank - they are filled from the Project Master (if you type them they must be the same as in the master, otherwise the row is rejected)."],, ["UnitNo, Area, PaymentPlan, BSPPSF, OtherChargesPSF, DSlab and DSlabType are TYPED in the file - they need not exist in any master. A blank one on a NEW booking is suggested from the Inventory / Price List masters when they have it; otherwise it stays blank. Branch is taken from the Associate's Emp row on the booking date when blank."]] : [["Blank cells of a NEW booking are filled automatically: Builder/ProjectLocation (Project), Area (Inventory), BSPPSF/OtherChargesPSF/PaymentPlan/DSlab/DSlabType (Price List on the booking date), Branch (Associate's Emp row on the booking date)."]]),
     [`Defaults for new bookings: ${Object.entries(NEW_BOOKING_DEFAULTS).map(([k, v]) => `${k} = ${v}`).join(", ")}.`],
     ["TO CORRECT EXISTING BOOKINGS: download the Bkg list (or a Data exceptions check), change the cells and upload that file as it is. A row whose BkgID is an existing booking is a correction of that booking (BkgID identifies it - do not change it)."],
     ["Blank cells keep the stored value. To empty a field on purpose, type [clear] in the cell. Calculated columns of a download (Director, DirectorRevenue, PendDue, L0_Emp ...) are ignored."],

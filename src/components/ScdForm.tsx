@@ -3,25 +3,28 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { computeBooking } from "@/lib/calc/booking";
 import { Hierarchy } from "@/lib/calc/hierarchy";
-import { applyLookups, demandSchedule, employeeNames, priceListFor, type FormData, type MasterData } from "@/lib/masters";
+import { applyLookups, demandSchedule, employeeNames, priceListFor, projectNames, type FormData, type MasterData } from "@/lib/masters";
 import { FORM_STATUSES, PROPERTY_TYPES, SOURCES_OF_LEAD } from "@/lib/fields";
 import { fmtDate, fmtNum } from "@/lib/format";
-import { saveScdAction, submitScdAction } from "@/app/actions";
+import { bkgEditAction, saveScdAction, submitScdAction } from "@/app/actions";
 import { COMPANY } from "../lib/company";
 
-type Mode = { kind: "new" } | { kind: "edit"; id: number; resubmit: boolean };
+const MASTER_FIELDS = ["Builder", "ProjectLocation", "Area", "PaymentPlan", "BSPPSF", "OtherChargesPSF", "DSlab", "DSlabType"];
+
+type Mode = { kind: "new" } | { kind: "edit"; id: number; resubmit: boolean } | { kind: "bkg"; bkgId: string };
 
 export function ScdForm({ masters, initial, role, mode }: { masters: MasterData; initial: FormData; role: string; mode: Mode }) {
   const router = useRouter();
   const [d, setD] = useState<FormData>(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string | null>(null);
-  const [agree, setAgree] = useState(mode.kind === "edit");
+  const [agree, setAgree] = useState(mode.kind !== "new");
   const [pending, start] = useTransition();
   const backOffice = role === "admin" || role === "master";
 
   const hierarchy = useMemo(() => new Hierarchy(masters.employees), [masters.employees]);
   const filled = useMemo(() => applyLookups(d, masters, true), [d, masters]);
+  const MANUAL = COMPANY.manualMasters; // TRPL: master-derived fields are typed; the masters only suggest (grey hint, used when left blank)
   const calc = useMemo(
     () =>
       computeBooking(filled, {
@@ -43,35 +46,46 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
   const set = (k: string, v: string | number | null) =>
     setD((p) => {
       const n = { ...p, [k]: v };
-      if (k === "Project") n.UnitNo = null;
+      if (k === "Project") {
+        n.UnitNo = null;
+        if (MANUAL) for (const f of MASTER_FIELDS) n[f] = null; // a new project: re-suggest from the masters
+      }
       if (k === "Emp" || k === "BkgLoginDate") n.Branch = null; // re-derive from Emp, still editable
       return n;
     });
 
-  const txt = (k: string, label: string, opts: { type?: string; ro?: boolean; req?: boolean } = {}) => (
+  const txt = (k: string, label: string, opts: { type?: string; ro?: boolean; req?: boolean } = {}) => {
+    const ro = opts.ro && !(MANUAL && MASTER_FIELDS.includes(k));
+    return (
     <Field k={k} label={label} req={opts.req} errors={errors}>
       <input
         id={k}
         className="input"
         type={opts.type ?? "text"}
-        readOnly={opts.ro}
-        value={String((opts.ro ? filled[k] : d[k]) ?? "")}
+        readOnly={ro}
+        placeholder={!ro && MANUAL && MASTER_FIELDS.includes(k) && filled[k] != null ? String(filled[k]) : undefined}
+        value={String((ro ? filled[k] : d[k]) ?? "")}
         onChange={(e) => set(k, e.target.value === "" ? null : e.target.value)}
       />
     </Field>
-  );
-  const num = (k: string, label: string, ro = false) => (
+    );
+  };
+  const num = (k: string, label: string, ro0 = false) => {
+    const ro = ro0 && !(MANUAL && MASTER_FIELDS.includes(k));
+    return (
     <Field k={k} label={label} errors={errors}>
       <input
         id={k}
         className="input text-right"
         inputMode="decimal"
         readOnly={ro}
+        placeholder={!ro && MANUAL && MASTER_FIELDS.includes(k) && filled[k] != null ? fmtNum(filled[k]) : undefined}
         value={ro ? fmtNum(filled[k]) : String(d[k] ?? "")}
         onChange={(e) => set(k, e.target.value === "" ? null : Number.isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value))}
       />
     </Field>
-  );
+    );
+  };
   const sel = (k: string, label: string, options: string[], req = false) => (
     <Field k={k} label={label} req={req} errors={errors}>
       <select id={k} className="input" value={String(d[k] ?? "")} onChange={(e) => set(k, e.target.value || null)}>
@@ -80,6 +94,13 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
       </select>
     </Field>
   );
+  // Builder / Project location come from the Project Master by themselves (typed only if the master has none for the project)
+  const pick = (k: "Builder" | "ProjectLocation", label: string) => {
+    const p = masters.projects.find((x) => x.name.toLowerCase() === String(filled.Project ?? "").toLowerCase());
+    const fromMaster = k === "Builder" ? p?.builder : p?.location;
+    if (fromMaster) return <Field k={k} label={label} errors={errors}><input id={k} className="input" readOnly value={String(filled[k] ?? "")} /></Field>;
+    return txt(k, label);
+  };
   const out = (label: string, v: unknown, strong = false) => (
     <div>
       <span className="label">{label}</span>
@@ -91,6 +112,16 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
     setMessage(null);
     if (!agree) return setMessage("Please accept the declaration at the bottom of the form.");
     start(async () => {
+      if (mode.kind === "bkg") {
+        // what the screen shows for the master-driven fields (Builder, Location, suggested prices, Branch) is what is saved
+        const send: FormData = { ...d };
+        for (const k of [...MASTER_FIELDS, "Branch"]) if (d[k] === null || d[k] === undefined || d[k] === "") send[k] = filled[k] ?? null;
+        if (MANUAL) { send.Builder = filled.Builder ?? null; send.ProjectLocation = filled.ProjectLocation ?? null; }
+        const e = await bkgEditAction(mode.bkgId, send);
+        if (e.ok) { router.push(e.applied ? `/bookings/${mode.bkgId}?saved=1` : `/changes/${e.id}`); router.refresh(); }
+        else { setErrors(e.errors ?? {}); setMessage(e.message ?? "Please fix the highlighted fields."); window.scrollTo({ top: 0, behavior: "smooth" }); }
+        return;
+      }
       const r = mode.kind === "new" ? await submitScdAction(d) : await saveScdAction(mode.id, d);
       if (r.ok) {
         if (r.bkgId) router.push(`/bookings/${r.bkgId}`);
@@ -107,6 +138,12 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
   return (
     <div className="space-y-4">
       {message && <div className="card border-red-300 bg-red-50 text-sm text-red-800">{message}</div>}
+      {mode.kind === "bkg" && (
+        <div className="card border-sky-200 bg-sky-50 text-sm">
+          Editing booking <b>{mode.bkgId}</b>. White boxes can be changed; grey boxes are calculated, or come from the Project Master / price list and change when you change the project or date.
+          Receipts and dues come from Exp and are not edited here. {role === "master" ? "Your changes are saved at once and logged." : "Your changes go to Master for approval; nothing changes until Master approves."}
+        </div>
+      )}
 
       <Section title="Lead">
         {sel("SourceOfLead", "Source of lead", SOURCES_OF_LEAD, true)}
@@ -152,15 +189,22 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
       <section className="card">
         <h2 className="h2">Project / Unit</h2>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        {sel("Project", "Project", masters.projects.map((p) => p.name), true)}
-        {txt("Builder", "Builder", { ro: true })}
-        {txt("ProjectLocation", "Project location", { ro: true })}
+        {sel("Project", "Project", MANUAL ? projectNames(masters) : masters.projects.map((p) => p.name), true)}
+        {MANUAL ? pick("Builder", "Builder") : txt("Builder", "Builder", { ro: true })}
+        {MANUAL ? pick("ProjectLocation", "Project location") : txt("ProjectLocation", "Project location", { ro: true })}
+        {MANUAL ? (
+          <Field k="UnitNo" label="Unit no." req errors={errors}>
+            <input id="UnitNo" className="input" list="unit-list" value={String(d.UnitNo ?? "")} onChange={(e) => set("UnitNo", e.target.value || null)} />
+            <datalist id="unit-list">{units.map((u) => <option key={u.unitNo} value={u.unitNo} />)}</datalist>
+          </Field>
+        ) : (
         <Field k="UnitNo" label="Unit no. (available only)" req errors={errors}>
           <select id="UnitNo" className="input" value={String(d.UnitNo ?? "")} onChange={(e) => set("UnitNo", e.target.value || null)} disabled={!filled.Project}>
             <option value="">{filled.Project ? (units.length ? "— select —" : "No units available") : "Pick a project first"}</option>
             {units.map((u) => <option key={u.unitNo} value={u.unitNo}>{u.unitNo}</option>)}
           </select>
         </Field>
+        )}
         {txt("BuilderUID", "Builder UID")}
         <div className="hidden md:block" />
         {num("Area", "Area (sq ft)", true)}
@@ -168,7 +212,7 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
         </div>
       </section>
 
-      {filled.Project && filled.BkgLoginDate && !pl && (
+      {!MANUAL && filled.Project && filled.BkgLoginDate && !pl && (
         <div className="card border-amber-300 bg-amber-50 text-sm">No price list covers {String(filled.Project)} on {fmtDate(filled.BkgLoginDate)}. Ask the back office to update the price list.</div>
       )}
 
@@ -271,12 +315,14 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
       )}
 
       <section className="card space-y-3">
+        {mode.kind !== "bkg" && (
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" className="mt-1" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
           <span>I undertake that the details mentioned above are true and I am solely responsible for all the details filled and commitments given to the Client(s). {COMPANY.legalName} is not responsible for any of my actions/commitments to the Client(s).</span>
         </label>
+        )}
         <button className="btn btn-primary" onClick={submit} disabled={pending}>
-          {pending ? "Saving…" : mode.kind === "new" ? (role === "master" ? "Save to Bkg" : "Submit for approval") : mode.resubmit ? "Resubmit for approval" : "Save changes"}
+          {pending ? "Saving…" : mode.kind === "bkg" ? (role === "master" ? "Save changes to Bkg" : "Send changes to Master for approval") : mode.kind === "new" ? (role === "master" ? "Save to Bkg" : "Submit for approval") : mode.resubmit ? "Resubmit for approval" : "Save changes"}
         </button>
       </section>
     </div>

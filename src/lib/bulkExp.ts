@@ -1,19 +1,20 @@
 import "server-only";
 import ExcelJS from "exceljs";
 import Papa from "papaparse";
-import { inArray, sql } from "drizzle-orm";
+import { and, inArray, sql } from "drizzle-orm";
 import { getDb, schema as s } from "./db";
 import { fieldOfHeader, parsePaste, type PastedLine } from "./pasteLines";
-import { EXP_FIELDS, fieldKey, normalizeExp, normalizeExpDoc, type Errors, type ExpData, type ExpDocData, type ExpUploadUpdate } from "./changes";
+import { EXP_FIELDS, buildExpCtx, fieldKey, normalizeExp, normalizeExpDoc, type Errors, type ExpData, type ExpDocData, type ExpUploadAdd, type ExpUploadMerge, type ExpUploadUpdate, previewMerge } from "./changes";
 import { activeModes, expHeadList } from "./data";
 import { str } from "./calc/excel";
+import { CALC_COLOUR, EXP_TEMPLATE_COLUMNS, FILL_COLOUR, colNote, kindOfCol } from "./expLayout";
 
 // Upload of Exp lines: ONE file both adds new transactions and corrects existing lines.
 //  - A row whose DocNo is an existing line is a CORRECTION of that line. Blank cells keep the stored value; type [clear] to empty a field.
 //  - Every other row is NEW. Rows with the same Group label are one transaction: one document numbered automatically (Chq-nnnnn / RPnnnnn)
 //    with lines -01, -02 ...; a row with no Group is a document of its own. Type a DocNo only to choose the number of a new document.
 // Columns that are calculated (ExpType, SignedGross, Director, L0 / L1 ...) are ignored, so a downloaded Exp / Data exceptions file can be corrected and uploaded as it is.
-export const EXP_TEMPLATE_COLUMNS = ["Group", "DocNo", "PayDate", "ValueDate", "Head", "Mode", "R/P", "Gross", "GST", "TDS", "BkgID", "Emp", "Project", "Branch", "Narration", "Remarks", "Purpose", "PaymentMode", "Chq/UTR No", "Chq/UTR Date", "Bank Name"];
+export { EXP_TEMPLATE_COLUMNS };
 export const EXP_BULK_MAX = 500;
 
 export interface Change { field: string; from: unknown; to: unknown }
@@ -22,12 +23,12 @@ export interface ExpBulkCounts { newDocs: number; newLines: number; changed: num
 export interface ExpBulkOpts { allowAdd: boolean; allowUpdate: boolean }
 export interface ExpBulkCheck {
   rows: ExpBulkRow[]; warnings: string[]; counts: ExpBulkCounts;
-  creates: ExpDocData[]; updates: ExpUploadUpdate[]; before: { rows: Record<string, Record<string, unknown>> };
+  creates: ExpDocData[]; updates: ExpUploadUpdate[]; adds: ExpUploadAdd[]; merges: ExpUploadMerge[]; before: { rows: Record<string, Record<string, unknown>> };
 }
 
 const key = (v: unknown) => String(v ?? "").trim().toLowerCase();
 const LABEL: Record<string, string> = {
-  payDate: "Pay date", valueDate: "Value date", head: "Head", mode: "Mode", rp: "R/P", gross: "Gross", gst: "GST", tds: "TDS", branch: "Branch", bkgId: "BkgID", emp: "Emp",
+  payDate: "Pay date", valueDate: "Value date", head: "Head", mode: "Mode", rp: "R/P", gross: "Gross", gst: "GST", tds: "TDS", branch: "Branch", bkgId: "BkgID", emp: "Emp", relatedEmpName: "RelatedEmpName", expMonth: "ExpMonth",
   project: "Project", narration: "Narration", remarks: "Remarks", purpose: "Purpose", paymentMode: "PaymentMode", instrNo: "Chq/UTR No", instrDate: "Chq/UTR Date", chqBank: "Bank Name",
 };
 
@@ -60,6 +61,16 @@ export async function checkExpUpload(raw: Record<string, unknown>[], opts: ExpBu
   const typed = [...new Set(rows.map((r) => key(r.docNo)).filter(Boolean))];
   const existing = typed.length ? await db.select().from(s.expEntries).where(inArray(sql`lower(${s.expEntries.docNo})`, typed)) : [];
   const existingBy = new Map(existing.map((e) => [key(e.docNo), e]));
+  // an entry without a DocNo is shown by its row id (list and download): a number typed for it identifies that entry
+  const idsTyped = typed.filter((x) => /^\d+$/.test(x) && !existingBy.has(x)).map(Number);
+  if (idsTyped.length) {
+    const noDoc = await db.select().from(s.expEntries).where(and(inArray(s.expEntries.id, idsTyped), sql`coalesce(${s.expEntries.docNo}, '') = ''`));
+    for (const e of noDoc) existingBy.set(String(e.id), e);
+  }
+  const entryLabel = (e: { docNo: string | null; id: number }) => e.docNo || String(e.id);
+  const anchorList = new Map<string, { e: (typeof existing)[number]; r: ExpBulkRow }[]>(); // Group label -> the existing rows that carry it
+  // every lookup of the whole file in a handful of queries (per-row queries time out on a few hundred rows)
+  const ctx = await buildExpCtx([...rows.map((r) => r.line as Record<string, unknown>), ...existingBy.values() as Iterable<Record<string, unknown>>]);
 
   const updates: ExpUploadUpdate[] = [];
   const beforeRows: Record<string, Record<string, unknown>> = {};
@@ -68,28 +79,75 @@ export async function checkExpUpload(raw: Record<string, unknown>[], opts: ExpBu
     const ex = r.docNo ? existingBy.get(key(r.docNo)) : undefined;
     if (!ex) { createRows.push(r); continue; }
     r.kind = "unchanged";
-    r.doc = String(ex.docNo);
-    if (r.group) r.errors.group = "Group is for new rows only - this DocNo already exists";
+    r.doc = entryLabel(ex);
+    if (r.group) anchorList.set(key(r.group), [...(anchorList.get(key(r.group)) ?? []), { e: ex, r }]);
     if (!opts.allowUpdate) { r.errors.docNo = "Changing existing records is switched off"; continue; }
     const base: Record<string, unknown> = Object.fromEntries(EXP_FIELDS.map((k) => [k, (ex as Record<string, unknown>)[k] ?? null]));
+    // ExpMonth equal to the month the row already shows (a downloaded file) is not a change
+    const shown = (ex.expMonth as string | null) || str(ex.payDate as never).slice(0, 7);
+    if (r.line.expMonth !== undefined && r.line.expMonth === shown) delete r.line.expMonth;
     const merged: Record<string, unknown> = { ...base, ...r.line };
     for (const k of clears[i]) merged[k] = null;
-    const n = await normalizeExp(merged, ex.id);
+    const n = await normalizeExp(merged, ex.id, ctx);
     Object.assign(r.errors, n.errors);
     r.line = { ...r.line, ...(n.data as PastedLine) };
     r.changes = EXP_FIELDS.filter((k) => fieldKey(k, base[k]) !== fieldKey(k, n.data[k])).map((k) => ({ field: LABEL[k] ?? k, from: base[k], to: n.data[k] }));
     if (r.changes.length) {
       r.kind = "changed";
       if (!Object.keys(r.errors).length) {
-        updates.push({ id: ex.id, docNo: String(ex.docNo), values: n.data as ExpData, changes: r.changes });
+        updates.push({ id: ex.id, docNo: entryLabel(ex), values: n.data as ExpData, changes: r.changes });
         beforeRows[String(ex.id)] = { ...base, docNo: ex.docNo };
       }
     }
   }
 
+  // a Group label on existing rows of ONE document: new rows join that document. On rows of SEVERAL documents: those documents are merged into one
+  // (the lowest-numbered entry gives its number, as with "merge entries" on the Exp page) and the new rows join it.
+  const merges: ExpUploadMerge[] = [];
+  const anchorBase = new Map<string, string | null>(); // Group label -> document number the new rows are added to
+  for (const [label, list] of anchorList) {
+    const bases = new Set(list.map((x) => x.e.docBase ?? x.e.docNo ?? String(x.e.id)));
+    if (bases.size < 2) { anchorBase.set(label, list[0].e.docBase ?? list[0].e.docNo ?? null); continue; }
+    if (!opts.allowUpdate) continue; // those rows already carry the error
+    const pv = await previewMerge(db, [...new Set(list.map((x) => x.e.id))]);
+    if (!pv.ok) { for (const x of list) x.r.errors.group = pv.message; anchorBase.set(label, null); continue; }
+    merges.push({ ids: [...new Set(list.map((x) => x.e.id))] });
+    anchorBase.set(label, pv.base);
+    for (const p of pv.plan) {
+      const x = list.find((y) => y.e.id === p.id);
+      if (!x) continue;
+      x.r.doc = `merged into ${pv.base}`;
+      if (p.will !== p.was) { x.r.kind = "changed"; x.r.changes.push({ field: "DocNo", from: p.was, to: p.will }); }
+    }
+  }
+
+  // new rows whose Group label is on an existing row (or is an existing document number) are added to that document; its old lines keep their DocNo
+  const joinLabels = [...new Set(createRows.map((r) => key(r.group)).filter((g) => g && !anchorBase.has(g)))];
+  const byDoc = joinLabels.length
+    ? await db.select().from(s.expEntries).where(sql`lower(${s.expEntries.docBase}) in (${sql.join(joinLabels.map((g) => sql`${g}`), sql`, `)}) or (${s.expEntries.docBase} is null and lower(${s.expEntries.docNo}) in (${sql.join(joinLabels.map((g) => sql`${g}`), sql`, `)}))`)
+    : [];
+  const docByLabel = new Map<string, string>();
+  for (const e of byDoc) { const b = e.docBase ?? e.docNo; if (b) { for (const g of joinLabels) if (g === key(b)) docByLabel.set(g, b); } }
+  const adds = new Map<string, { lines: ExpData[]; rows: ExpBulkRow[] }>();
+  const stillNew: ExpBulkRow[] = [];
+  for (const r of createRows) {
+    const g = key(r.group);
+    const hasAnchor = g ? anchorBase.has(g) : false;
+    const base = g ? (hasAnchor ? anchorBase.get(g) ?? undefined : docByLabel.get(g)) : undefined;
+    if (!g || (!base && !hasAnchor)) { stillNew.push(r); continue; }
+    r.doc = base ? `adds to ${base}` : "";
+    if (!opts.allowAdd) { r.errors.docNo = "Adding new records is switched off"; continue; }
+    if (!base) { r.errors.group = "That row has no DocNo, so a line cannot be added to its document - give it a DocNo first"; continue; }
+    if (r.docNo) r.errors.docNo = "Leave DocNo blank on a row that is added to an existing document";
+    const n = await normalizeExp(r.line, null, ctx);
+    Object.assign(r.errors, n.errors);
+    const a = adds.get(base) ?? { lines: [], rows: [] };
+    a.lines.push(n.data); a.rows.push(r); adds.set(base, a);
+  }
+
   // new rows: one document per Group label; else a typed DocNo; else one document per row
   const groups = new Map<string, ExpBulkRow[]>();
-  createRows.forEach((r, i) => {
+  stillNew.forEach((r, i) => {
     if (!opts.allowAdd) r.errors.docNo = "Adding new records is switched off";
     const k = r.group ? `g:${key(r.group)}` : r.docNo ? `d:${key(r.docNo)}` : `r:${i}`;
     groups.set(k, [...(groups.get(k) ?? []), r]);
@@ -107,7 +165,7 @@ export async function checkExpUpload(raw: Record<string, unknown>[], opts: ExpBu
     }
     const label = g[0].group ? `Group ${g[0].group}` : docNo ?? "";
     g.forEach((r, j) => (r.doc = g.length > 1 ? `${label || "new doc"} · line ${String(j + 1).padStart(2, "0")}` : label));
-    const n = await normalizeExpDoc({ docNo, lines: g.map((r) => r.line) }, null);
+    const n = await normalizeExpDoc({ docNo, lines: g.map((r) => r.line) }, null, ctx);
     for (const [k, v] of Object.entries(n.errors)) {
       const m = /^line\.(\d+)\.(.+)$/.exec(k);
       if (m) g[Number(m[1])].errors[m[2]] = v;
@@ -116,19 +174,8 @@ export async function checkExpUpload(raw: Record<string, unknown>[], opts: ExpBu
     creates.push(n.data);
   }
 
-  // the same cheque / UTR number, date and amount on two different documents of this file
-  const seen = new Map<string, ExpBulkRow>();
-  for (const r of rows) {
-    const l = r.line;
-    if (!l.instrNo || !l.instrDate) continue;
-    const k = [key(l.instrNo), l.instrDate, l.gross, l.rp].join("|");
-    const o = seen.get(k);
-    const sameDoc = o && r.kind === "new" && o.kind === "new" && ((r.group && key(o.group) === key(r.group)) || (!r.group && r.docNo && key(o.docNo) === key(r.docNo)));
-    if (o && !sameDoc && !r.errors.instrNo) r.errors.instrNo = `Same Chq/UTR No, date and amount as row ${o.row} of this file`;
-    if (!o) seen.set(k, r);
-  }
   const counts: ExpBulkCounts = { newDocs: creates.length, newLines: createRows.length, changed: rows.filter((r) => r.kind === "changed").length, unchanged: rows.filter((r) => r.kind === "unchanged").length };
-  return { rows, warnings, counts, creates, updates, before: { rows: beforeRows } };
+  return { rows, warnings, counts, creates, updates, adds: [...adds].map(([docBase, a]) => ({ docBase, lines: a.lines })), merges, before: { rows: beforeRows } };
 }
 
 export async function expTemplateXlsx(): Promise<Buffer> {
@@ -142,22 +189,30 @@ export async function expTemplateXlsx(): Promise<Buffer> {
   ex({ PayDate: "20-10-2026", Head: head, Mode: mode, "R/P": "Payment", Gross: 1500, Emp: "Employee~Code", Narration: "Example: no Group, so a document of its own" });
   ex({ Group: "A", PayDate: "20-10-2026", Head: head, Mode: mode, "R/P": "Payment", Gross: 800, Emp: "Employee~Code", Narration: "Example: Group A, becomes line -01 of one document" });
   ex({ Group: "A", PayDate: "20-10-2026", Head: head, Mode: mode, "R/P": "Payment", Gross: 700, Emp: "Employee~Code", Narration: "Example: Group A, becomes line -02 of the same document" });
-  ws.getRow(1).font = { bold: true };
+  const hdr = ws.getRow(1);
+  hdr.font = { bold: true };
+  EXP_TEMPLATE_COLUMNS.forEach((c, i) => {
+    const cell = hdr.getCell(i + 1);
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: kindOfCol(c) === "fill" ? FILL_COLOUR : CALC_COLOUR } };
+    cell.note = colNote(c);
+    ws.getColumn(i + 1).width = Math.max(12, c.length + 2);
+  });
   ws.views = [{ state: "frozen", ySplit: 1 }];
-  EXP_TEMPLATE_COLUMNS.forEach((c, i) => (ws.getColumn(i + 1).width = Math.max(12, c.length + 2)));
 
   const help = wb.addWorksheet("Instructions");
   [
+    ["COLOURS OF THE COLUMN HEADINGS: GREEN = type / correct by hand, it is read on upload. GREY columns are built in and ignored on upload even if you type in them. EXPMONTH is optional: blank = built in from PayDate (yyyy-mm); a month you type (2026-10, Oct-2026) is kept as typed; type [clear] to go back to the PayDate month. The same colours are used in the Exp download, whose columns are in the same order as here."],
     ["TO ADD NEW TRANSACTIONS: fill rows with a blank DocNo (delete the three example rows first). One row = one Exp line."],
-    ["To make one transaction of several rows, type the same label in the Group column on each of those rows (A, B, 1, 2, Rent-Oct ... anything). They are saved as ONE document with an automatic number (Chq-nnnnn for Chq, RPnnnnn otherwise); the lines are numbered -01, -02 ... in the order of the rows. The Group label is only a marker for the file; it is not stored."],
+    ["To make one transaction of several rows, type the same label in the Group column on each of those rows (A, B, 1, 2, Rent-Oct ... anything). They are saved as ONE document with an automatic number (Chq-nnnnn for Chq, RPnnnnn otherwise) and lines -01, -02 ..."],
+    ["To ADD A LINE TO AN EXISTING DOCUMENT: put the same Group label on the existing row (keep its DocNo) and on the new row (blank DocNo). The new row becomes the next line of that document; the old DocNo is not changed. You may also type the existing document number itself in Group of the new row."],
     ["Rows with a blank Group are one document each. Type a DocNo on a new row only if you want to choose the document number yourself."],
-    ["TO CORRECT EXISTING LINES: download the Exp list or a Data exceptions check from the site, change the cells, and upload that file as it is. A row whose DocNo is an existing line is a correction of that line (DocNo is what identifies the line - do not change it)."],
-    ["Blank cells keep the stored value. To empty a field on purpose, type [clear] in the cell. Calculated columns of a download (ExpType, SignedGross, Director, L0/L1 ...) are ignored."],
+    ["TO CORRECT EXISTING LINES: download the Exp list (or a Data exceptions check) from the site, change the green cells, and upload that file as it is. A row whose DocNo is an existing line is a correction of that line (DocNo identifies the line - do not change it). An entry that shows no DocNo in the list is identified by the number shown in its place (its row id) - keep that number in DocNo."],
+    ["Blank cells keep the stored value. To empty a field on purpose, type [clear] in the cell. Calculated columns of the download (ExpType, SignedGross, Client, Director, Data Exception Remarks, Rcv_..., L0/L1 ...) are ignored."],
     ["You can mix corrections and new transactions in one file. Uploading does not delete anything."],
     [`Required for new rows: PayDate, Head, Mode, R/P, Gross, and Emp (Emp is taken from the booking when BkgID is filled). Up to ${EXP_BULK_MAX} rows per upload.`],
     ["Dates: dd-mm-yyyy or yyyy-mm-dd. ValueDate defaults to PayDate. R/P: Receipt or Payment (a negative Gross is read as a Payment of that amount)."],
     ["Mode = Chq lines also need Purpose, PaymentMode (Cheque, RTGS, UPI...), Chq/UTR No and Chq/UTR Date. For other modes those columns are ignored."],
-    ["BkgID must exist in Bkg. Emp must match the Emp sheet exactly, e.g. Name~Code."],
+    ["BkgID must exist in Bkg. Emp must match the Emp sheet exactly, e.g. Name~Code. RelatedEmpName is free text (a note such as a builder or 'Need Detail')."],
     ["The whole file is rejected if any row has an error; nothing is saved until every row passes. Master uploads apply at once; an Admin upload is sent to Master for approval."],
     [`Heads: ${heads.map((h) => h.head).join(", ")}`],
     [`Modes: ${modes.join(", ")}`],

@@ -13,7 +13,7 @@ export interface HistoryItem {
 const FIELD_LABEL: Record<string, string> = {
   head: "Head", mode: "Mode", rp: "R/P", gross: "Gross", gst: "GST", tds: "TDS", bkgId: "BkgID", emp: "Employee", project: "Project", narration: "Narration",
   remarks: "Remarks", payDate: "Pay date", valueDate: "Value date", branch: "Branch", purpose: "Purpose", paymentMode: "PaymentMode", instrNo: "Chq/UTR No",
-  instrDate: "Chq/UTR Date", chqBank: "Bank",
+  instrDate: "Chq/UTR Date", chqBank: "Bank", relatedEmpName: "Related Emp Name", expMonth: "ExpMonth",
 };
 const norm = (v: unknown) => (v === null || v === undefined || v === "" ? "" : String(v));
 
@@ -59,6 +59,7 @@ function describeUpload(data: Row, lineDocNos: string[], base: string): string {
     const ch = (Array.isArray(u.changes) ? u.changes : []) as { field: string; from: unknown; to: unknown }[];
     parts.push(`${u.docNo}: ${ch.map((c) => `${c.field} ${norm(c.from) || "—"} → ${norm(c.to) || "—"}`).join("; ") || "no change"}`);
   }
+  for (const a of (Array.isArray(data.adds) ? data.adds : []) as Row[]) if (a.docBase === base) parts.push(`${(Array.isArray(a.lines) ? a.lines.length : 0)} line(s) added`);
   if (((Array.isArray(data.creates) ? data.creates : []) as Row[]).some((c) => c.docBase === base || c.docNo === base)) parts.push("Created");
   return `Upload (${String(data.fileName ?? "file")}) — ${parts.join(" | ")}`;
 }
@@ -77,7 +78,8 @@ export async function docHistory(base: string, lineDocNos: string[] = []): Promi
        or cr.data->>'docNo' = any(${sql.raw(`array[${likeLines.map((x) => `'${x.replace(/'/g, "''")}'`).join(",")}]::text[]`)})
        or (cr.action = 'bulk_upload' and (
             exists (select 1 from jsonb_array_elements(coalesce(cr.data->'updates','[]'::jsonb)) u where u->>'docNo' = any(${sql.raw(`array[${likeLines.map((x) => `'${x.replace(/'/g, "''")}'`).join(",")}]::text[]`)}))
-         or exists (select 1 from jsonb_array_elements(coalesce(cr.data->'creates','[]'::jsonb)) c where c->>'docBase' = ${base} or c->>'docNo' = ${base}))))
+         or exists (select 1 from jsonb_array_elements(coalesce(cr.data->'creates','[]'::jsonb)) c where c->>'docBase' = ${base} or c->>'docNo' = ${base})
+         or exists (select 1 from jsonb_array_elements(coalesce(cr.data->'adds','[]'::jsonb)) a where a->>'docBase' = ${base}))))
     order by cr.id desc
     limit 100`));
   return r.map((x) => ({

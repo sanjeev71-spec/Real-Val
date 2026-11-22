@@ -93,17 +93,24 @@ export function validateBooking(d: FormData, m: MasterData, o: ValidateOpts): Er
       e.Emp = `Not employed on ${str(d.BkgLoginDate)} as per Emp (check DOJ / exit date)`;
   }
 
+  const manual = COMPANY.manualMasters; // project / unit / price are typed: masters only suggest
   const proj = m.projects.find((p) => p.name.toLowerCase() === str(d.Project).toLowerCase());
-  if (d.Project && !proj) e.Project = "Unknown project";
-  if (proj && d.UnitNo) {
-    const unit = m.inventory.find((u) => u.project.toLowerCase() === proj.name.toLowerCase() && u.unitNo === str(d.UnitNo));
-    if (!unit) e.UnitNo = "Unit not in inventory for this project";
-    else if (SOLD_STATUSES.includes(str(d.FormStatus)) && unit.status !== "Available")
+  if (d.Project && !proj) e.Project = manual ? `Project "${str(d.Project)}" is not in the Project Master - add it under Admin > Projects first` : "Unknown project";
+  if (manual && proj) {
+    // the project's Builder and Location are those of the Project Master (blank is filled from it)
+    if (proj.builder && str(d.Builder) && str(d.Builder).toLowerCase() !== proj.builder.toLowerCase()) e.Builder = `Builder of ${proj.name} is ${proj.builder} in the Project Master`;
+    if (proj.location && str(d.ProjectLocation) && str(d.ProjectLocation).toLowerCase() !== proj.location.toLowerCase()) e.ProjectLocation = `Location of ${proj.name} is ${proj.location} in the Project Master`;
+  }
+  if ((manual ? str(d.Project) : proj) && d.UnitNo) {
+    const pname = (proj?.name ?? str(d.Project)).toLowerCase();
+    const unit = m.inventory.find((u) => u.project.toLowerCase() === pname && u.unitNo === str(d.UnitNo));
+    if (!unit && !manual) e.UnitNo = "Unit not in inventory for this project";
+    else if (unit && SOLD_STATUSES.includes(str(d.FormStatus)) && unit.status !== "Available")
       e.UnitNo = `Unit is ${unit.status.toLowerCase()}`;
-    const k = `${proj.name.toLowerCase()}|${str(d.UnitNo)}`;
+    const k = `${pname}|${str(d.UnitNo)}`;
     if (o.takenInBatch?.has(k) && SOLD_STATUSES.includes(str(d.FormStatus))) e.UnitNo = "Same unit appears twice in this file";
   }
-  if (o.mode === "scd" && proj && d.BkgLoginDate && !priceListFor(m, d.Project, d.BkgLoginDate))
+  if (o.mode === "scd" && !manual && proj && d.BkgLoginDate && !priceListFor(m, d.Project, d.BkgLoginDate))
     e.BkgLoginDate = "No price list covers this project on this date — ask the back office to update the price list";
 
   if (d.Email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(str(d.Email))) e.Email = "Invalid email";

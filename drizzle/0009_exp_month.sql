@@ -1,0 +1,1 @@
+ALTER TABLE "exp_entries" ADD COLUMN "exp_month" text;

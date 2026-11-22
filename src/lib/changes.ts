@@ -5,6 +5,7 @@ import { appUrl, sendMail } from "./mail";
 import { activeModes, currentPeriods, expHeadList, todayIso, usersByRole } from "./data";
 import { str } from "./calc/excel";
 import { parseDate } from "./validate";
+import { parsePasteMonth } from "./pasteLines";
 import type { User } from "./auth";
 import { COMPANY } from "./company";
 import { resyncEmployees } from "./empSync";
@@ -30,10 +31,48 @@ export const ACTION_LABEL: Record<string, string> = {
 
 // =================================================================== Exp
 
-export const EXP_FIELDS = ["payDate", "valueDate", "head", "mode", "rp", "gross", "gst", "tds", "branch", "bkgId", "emp", "project", "narration", "remarks", "purpose", "paymentMode", "instrNo", "instrDate", "chqBank"] as const;
-export type ExpData = Record<(typeof EXP_FIELDS)[number], string | number | null>;
+export const EXP_FIELDS = ["payDate", "valueDate", "head", "mode", "rp", "gross", "gst", "tds", "branch", "bkgId", "emp", "project", "narration", "remarks", "purpose", "paymentMode", "instrNo", "instrDate", "chqBank", "relatedEmpName", "expMonth"] as const;
+/** relatedEmpName is optional: forms do not carry it, so a form edit leaves the stored value alone. */
+export type ExpData = Record<Exclude<(typeof EXP_FIELDS)[number], "relatedEmpName" | "expMonth">, string | number | null> & { relatedEmpName?: string | null; expMonth?: string | null };
 
-export async function normalizeExp(raw: Record<string, unknown>, selfId?: number | null): Promise<{ data: ExpData; errors: Errors }> {
+/** Everything normalizeExp looks up, loaded ONCE for a whole file (a file of 400 rows otherwise needs thousands of queries and times out). */
+export interface ExpCtx {
+  heads: Set<string>; modes: Set<string>; emps: Set<string>;
+  /** File upload: a BLANK Head, Emp, Mode, date, amount or cheque detail is saved as it is and shown in the Data exception remarks (not rejected). */
+  lenient: boolean;
+  bkgEmp: Map<string, string | null>; // BkgID -> Emp of the booking (only bookings that exist)
+  instr: Map<string, { id: number; docNo: string | null; instrDate: string | null; gross: number | null; rp: string | null }[]>; // lower(Chq/UTR no) -> stored entries
+}
+const low = (v: unknown) => str(v as never).toLowerCase();
+
+/** Loads the lookups for the given raw lines (and the stored entries they correct, whose values are validated again too). */
+export async function buildExpCtx(lines: Record<string, unknown>[]): Promise<ExpCtx> {
+  const db = await getDb();
+  const bkgIds = [...new Set(lines.map((l) => txt(l.bkgId)?.toUpperCase()).filter((x): x is string => !!x))];
+  const emps = [...new Set(lines.map((l) => txt(l.emp)).filter((x): x is string => !!x))];
+  const instrNos = [...new Set(lines.map((l) => txt(l.instrNo)?.toLowerCase()).filter((x): x is string => !!x))];
+  const chunk = <T,>(a: T[], n = 500) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n));
+  const [heads, modes] = await Promise.all([expHeadList(), activeModes()]);
+  const ctx: ExpCtx = { heads: new Set(heads.map((h) => h.head.toLowerCase())), modes: new Set(modes.map((m) => m.toLowerCase())), emps: new Set(), bkgEmp: new Map(), instr: new Map(), lenient: true };
+  for (const c of chunk(bkgIds)) {
+    const r = await db.select({ id: s.bookings.bkgId, data: s.bookings.data }).from(s.bookings).where(inArray(s.bookings.bkgId, c));
+    for (const b of r) ctx.bkgEmp.set(b.id, ((b.data as Record<string, unknown>).Emp as string) ?? null);
+  }
+  // Emp of a booking is looked up too (it is the default Emp)
+  const allEmps = [...new Set([...emps, ...[...ctx.bkgEmp.values()].filter((x): x is string => !!x)])];
+  for (const c of chunk(allEmps)) {
+    const r = await db.selectDistinct({ emp: s.employees.emp }).from(s.employees).where(inArray(s.employees.emp, c));
+    for (const e of r) ctx.emps.add(e.emp);
+  }
+  for (const c of chunk(instrNos)) {
+    const r = await db.select({ id: s.expEntries.id, docNo: s.expEntries.docNo, instrNo: s.expEntries.instrNo, instrDate: s.expEntries.instrDate, gross: s.expEntries.gross, rp: s.expEntries.rp })
+      .from(s.expEntries).where(inArray(sql`lower(${s.expEntries.instrNo})`, c));
+    for (const e of r) { const k = low(e.instrNo); ctx.instr.set(k, [...(ctx.instr.get(k) ?? []), { id: e.id, docNo: e.docNo, instrDate: e.instrDate as string | null, gross: e.gross as number | null, rp: e.rp }]); }
+  }
+  return ctx;
+}
+
+export async function normalizeExp(raw: Record<string, unknown>, selfId?: number | null, ctx?: ExpCtx): Promise<{ data: ExpData; errors: Errors }> {
   const db = await getDb();
   const d: ExpData = {
     payDate: parseDate(raw.payDate ?? "") ?? null,
@@ -55,45 +94,56 @@ export async function normalizeExp(raw: Record<string, unknown>, selfId?: number
     instrNo: txt(raw.instrNo),
     instrDate: txt(raw.instrDate) ? parseDate(raw.instrDate) ?? null : null,
     chqBank: txt(raw.chqBank),
+    ...(raw.relatedEmpName !== undefined ? { relatedEmpName: txt(raw.relatedEmpName) } : {}),
+    ...(raw.expMonth !== undefined ? { expMonth: txt(raw.expMonth) } : {}),
   };
   const e: Errors = {};
-  if (!isDate(d.payDate)) e.payDate = "Pay date is required (dd-mm-yyyy)";
-  if (!isDate(d.valueDate)) e.valueDate = "Value date is required";
-  const heads = await expHeadList();
-  if (!d.head) e.head = "Head is required";
-  else if (!heads.some((h) => h.head.toLowerCase() === str(d.head).toLowerCase())) e.head = "Unknown head";
-  const modes = await activeModes();
-  if (!d.mode) e.mode = "Mode is required";
-  else if (!modes.some((m) => m.toLowerCase() === str(d.mode).toLowerCase())) e.mode = "Not in the Mode master";
+  if (d.expMonth) {
+    const mth = parsePasteMonth(d.expMonth);
+    if (!mth) e.expMonth = "ExpMonth must be a month such as 2026-10";
+    else d.expMonth = isDate(d.payDate) && mth === str(d.payDate).slice(0, 7) ? null : mth; // the same as the PayDate month = the formula, nothing to store
+  }
+  const soft = !!ctx?.lenient; // a blank value is allowed (and flagged by Data exceptions); a value that is typed but unknown or malformed is still an error
+  if (!isDate(d.payDate) && !(soft && !txt(d.payDate))) e.payDate = "Pay date is required (dd-mm-yyyy)";
+  if (!isDate(d.valueDate) && !(soft && !txt(d.valueDate))) e.valueDate = "Value date is required";
+  const heads = ctx ? null : await expHeadList();
+  if (!d.head) { if (!soft) e.head = "Head is required"; }
+  else if (!(ctx ? ctx.heads.has(low(d.head)) : heads!.some((h) => h.head.toLowerCase() === str(d.head).toLowerCase()))) e.head = "Unknown head";
+  const modes = ctx ? null : await activeModes();
+  if (!d.mode) { if (!soft) e.mode = "Mode is required"; }
+  else if (!(ctx ? ctx.modes.has(low(d.mode)) : modes!.some((m) => m.toLowerCase() === str(d.mode).toLowerCase()))) e.mode = "Not in the Mode master";
   // Cheque / UTR details belong to Mode = Chq only
   if (str(d.mode).toLowerCase() === "chq") {
-    if (!d.purpose) e.purpose = "Purpose is required for a Chq entry";
-    if (!d.paymentMode) e.paymentMode = "PaymentMode is required (Cheque, RTGS, UPI...)";
-    if (!d.instrNo) e.instrNo = "Chq / UTR No is required";
-    if (!isDate(d.instrDate)) e.instrDate = "Chq / UTR Date is required";
+    // (soft: missing cheque details are flagged by Data exceptions)
+    if (!soft && !d.purpose) e.purpose = "Purpose is required for a Chq entry";
+    if (!soft && !d.paymentMode) e.paymentMode = "PaymentMode is required (Cheque, RTGS, UPI...)";
+    if (!soft && !d.instrNo) e.instrNo = "Chq / UTR No is required";
+    if (!soft && !isDate(d.instrDate)) e.instrDate = "Chq / UTR Date is required";
   } else {
     d.purpose = d.paymentMode = d.instrNo = d.instrDate = d.chqBank = null;
   }
-  if (d.instrNo && d.instrDate && d.gross !== null && !e.instrNo) {
-    const dup = await db.select({ id: s.expEntries.id, docNo: s.expEntries.docNo }).from(s.expEntries)
-      .where(and(sql`lower(${s.expEntries.instrNo}) = ${str(d.instrNo).toLowerCase()}`, eq(s.expEntries.instrDate, str(d.instrDate)), eq(s.expEntries.gross, d.gross as number), eq(s.expEntries.rp, str(d.rp))))
-      .limit(3);
-    const other = dup.find((x) => x.id !== selfId);
-    if (other) e.instrNo = `Looks like a duplicate of ${other.docNo ?? "entry #" + other.id} (same Chq/UTR No, date and amount)`;
-  }
+  // the same Chq/UTR No, date and amount may legitimately appear on several entries (one payment can cover 2 bookings): no duplicate check
   if (d.rp !== "Receipt" && d.rp !== "Payment") e.rp = "Choose Receipt or Payment";
   for (const k of ["gross", "gst", "tds"] as const) {
     const v = d[k];
     if (v !== null && (typeof v !== "number" || !Number.isFinite(v) || v < 0)) e[k] = "Must be a positive number";
   }
-  if (d.gross === null) e.gross = "Gross is required";
+  if (d.gross === null && !soft) e.gross = "Gross is required";
   if (d.bkgId) {
-    const [b] = await db.select({ data: s.bookings.data }).from(s.bookings).where(eq(s.bookings.bkgId, str(d.bkgId)));
-    if (!b) e.bkgId = "No booking with this BkgID";
-    else if (!d.emp) d.emp = (b.data.Emp as string) ?? null; // default the Emp from the booking
+    let found = false;
+    let bEmp: string | null = null;
+    if (ctx) { found = ctx.bkgEmp.has(str(d.bkgId)); bEmp = ctx.bkgEmp.get(str(d.bkgId)) ?? null; }
+    else {
+      const [b] = await db.select({ data: s.bookings.data }).from(s.bookings).where(eq(s.bookings.bkgId, str(d.bkgId)));
+      found = !!b; bEmp = b ? ((b.data.Emp as string) ?? null) : null;
+    }
+    if (!found) e.bkgId = "No booking with this BkgID";
+    else if (!d.emp) d.emp = bEmp; // default the Emp from the booking
   }
-  if (!d.emp) e.emp = "Choose the employee";
-  else {
+  if (!d.emp) { if (!soft) e.emp = "Choose the employee"; }
+  else if (ctx) {
+    if (!ctx.emps.has(str(d.emp))) e.emp = "Not found in Emp";
+  } else {
     const [x] = await db.select({ id: s.employees.id }).from(s.employees).where(eq(s.employees.emp, str(d.emp))).limit(1);
     if (!x) e.emp = "Not found in Emp";
   }
@@ -311,7 +361,7 @@ export async function docLines(db: DB | Tx, base: string) {
 }
 
 /** Validates every line (header defaults are already merged in by the form) and, for a new document, the typed number. */
-export async function normalizeExpDoc(raw: Record<string, unknown>, existingBase: string | null): Promise<{ data: ExpDocData; errors: Errors }> {
+export async function normalizeExpDoc(raw: Record<string, unknown>, existingBase: string | null, ctx?: ExpCtx): Promise<{ data: ExpDocData; errors: Errors }> {
   const db = await getDb();
   const errors: Errors = {};
   const rawLines = Array.isArray(raw.lines) ? (raw.lines as Record<string, unknown>[]) : [];
@@ -333,17 +383,11 @@ export async function normalizeExpDoc(raw: Record<string, unknown>, existingBase
   }
 
   const lines: ExpDocLine[] = [];
-  const seen = new Set<string>();
   for (let i = 0; i < Math.min(rawLines.length, MAX_DOC_LINES); i++) {
     const rl = rawLines[i];
     const id = typeof rl.id === "number" ? rl.id : undefined;
-    const n = await normalizeExp(rl, id ?? null);
+    const n = await normalizeExp(rl, id ?? null, ctx);
     for (const [k, v] of Object.entries(n.errors)) errors[`line.${i}.${k}`] = v;
-    if (n.data.instrNo && n.data.instrDate) {
-      const key = [str(n.data.instrNo).toLowerCase(), n.data.instrDate, n.data.gross, n.data.rp].join("|");
-      if (seen.has(key)) errors[`line.${i}.instrNo`] = "Same Chq/UTR No, date and amount appears twice in this document";
-      seen.add(key);
-    }
     lines.push({ ...n.data, ...(id !== undefined ? { id } : {}) });
   }
   return { data: { docBase, lines }, errors };
@@ -358,7 +402,7 @@ async function nextDocBase(tx: Tx, mode: string | null): Promise<string> {
   return `${prefix}${String((rows[0]?.n ?? 0) + 1).padStart(5, "0")}`;
 }
 
-const lineValues = (l: ExpDocLine) => Object.fromEntries(EXP_FIELDS.map((k) => [k, l[k] ?? null]));
+const lineValues = (l: ExpDocLine) => Object.fromEntries(EXP_FIELDS.filter((k) => (k !== "relatedEmpName" && k !== "expMonth") || l[k] !== undefined).map((k) => [k, l[k] ?? null]));
 
 async function applyExpDoc(tx: Tx, action: string, d: ExpDocData, userId: number): Promise<string> {
   if (action === "create_doc") {
@@ -430,25 +474,73 @@ export const fieldKey = (k: string, v: unknown): string => {
 };
 
 export interface ExpUploadUpdate { id: number; docNo: string; values: ExpData; changes: { field: string; from: unknown; to: unknown }[] }
-export interface ExpUploadData { fileName: string; creates: ExpDocData[]; updates: ExpUploadUpdate[] }
+/** New lines added to an EXISTING document (its old lines and their DocNos stay as they are). */
+export interface ExpUploadAdd { docBase: string; lines: ExpData[] }
+/** Existing entries of different documents that one Group label ties together: they are merged into one document (the lowest id gives its number). */
+export interface ExpUploadMerge { ids: number[] }
+export interface ExpUploadData { fileName: string; creates: ExpDocData[]; updates: ExpUploadUpdate[]; adds?: ExpUploadAdd[]; merges?: ExpUploadMerge[] }
 
 async function applyBulkUpload(tx: Tx, d: ExpUploadData, before: Record<string, unknown> | null, userId: number): Promise<string> {
   const was = (before?.rows ?? {}) as Record<string, Record<string, unknown>>;
+  // one query for all stored lines, not one per row (a file of hundreds of rows would time out)
+  const upIds = (d.updates ?? []).map((u) => u.id);
+  const curById = new Map<number, ExpRowDb>();
+  for (let i = 0; i < upIds.length; i += 500) for (const c of await tx.select().from(s.expEntries).where(inArray(s.expEntries.id, upIds.slice(i, i + 500)))) curById.set(c.id, c);
   for (const u of d.updates ?? []) {
-    const [cur] = await tx.select().from(s.expEntries).where(eq(s.expEntries.id, u.id));
+    const cur = curById.get(u.id);
     if (!cur) throw new Error(`${u.docNo} no longer exists`);
     const old = was[String(u.id)];
     if (old && EXP_FIELDS.some((k) => fieldKey(k, old[k]) !== fieldKey(k, (cur as Record<string, unknown>)[k]))) throw new Error(`${u.docNo} was changed after this upload was prepared - upload again`);
     await tx.update(s.expEntries).set({ ...lineValues(u.values as ExpDocLine), updatedAt: new Date() } as never).where(eq(s.expEntries.id, u.id));
   }
-  for (const c of d.creates ?? []) await applyExpDoc(tx, "create_doc", c as unknown as ExpDocData as never, userId);
-  return `${(d.creates ?? []).length} new · ${(d.updates ?? []).length} changed`;
+  // documents tied together by a Group label are merged before lines are added to them
+  for (const m of d.merges ?? []) await applyMerge(tx, { ids: m.ids });
+  // new documents: numbers are handed out in memory (under the same lock as a single entry), lines are inserted in a few big statements
+  const creates = (d.creates ?? []) as unknown as ExpDocData[];
+  if (creates.length) {
+    await tx.execute(sql`select pg_advisory_xact_lock(424243)`);
+    const nextNo: Record<string, number> = {};
+    for (const prefix of ["Chq-", "RP"]) {
+      const r = await tx.execute(sql`select max((substring(doc_base from ${prefix.length + 1}::int))::int) as n from exp_entries where doc_base ~ ${"^" + prefix + "[0-9]+$"}`);
+      nextNo[prefix] = (("rows" in r ? r.rows : r) as { n: number | null }[])[0]?.n ?? 0;
+    }
+    const typed = creates.map((c) => c.docBase).filter((x): x is string => !!x);
+    if (typed.length) {
+      const clash = await tx.select({ id: s.expEntries.id, b: s.expEntries.docBase, n: s.expEntries.docNo }).from(s.expEntries)
+        .where(or(inArray(s.expEntries.docBase, typed), inArray(s.expEntries.docNo, typed))).limit(1);
+      if (clash.length) throw new Error(`Document ${clash[0].b ?? clash[0].n} already exists`);
+    }
+    const rowsToInsert: Record<string, unknown>[] = [];
+    for (const c of creates) {
+      let base = c.docBase;
+      if (!base) {
+        const prefix = str(c.lines[0]?.mode).toLowerCase() === "chq" ? "Chq-" : "RP";
+        base = `${prefix}${String(++nextNo[prefix]).padStart(5, "0")}`;
+      }
+      const single = c.lines.length === 1;
+      c.lines.forEach((l, i) => rowsToInsert.push({ ...lineValues(l), docBase: base, lineNo: single ? null : i + 1, docNo: single ? base : lineDocNo(base!, i + 1), createdBy: userId }));
+    }
+    for (let i = 0; i < rowsToInsert.length; i += 200) await tx.insert(s.expEntries).values(rowsToInsert.slice(i, i + 200) as never);
+  }
+  for (const a of d.adds ?? []) {
+    const cur = await docLines(tx, a.docBase);
+    if (!cur.length) throw new Error(`Document ${a.docBase} no longer exists`);
+    if (cur.length + a.lines.length > MAX_DOC_LINES) throw new Error(`Document ${a.docBase} would have more than ${MAX_DOC_LINES} lines`);
+    let next = Math.max(0, ...cur.map((c) => c.lineNo ?? 0)) + 1;
+    for (const l of a.lines) {
+      let docNo = lineDocNo(a.docBase, next);
+      while (await tx.select({ id: s.expEntries.id }).from(s.expEntries).where(eq(s.expEntries.docNo, docNo)).then((r) => r.length)) docNo = lineDocNo(a.docBase, ++next);
+      await tx.insert(s.expEntries).values({ ...lineValues(l as ExpDocLine), docBase: a.docBase, lineNo: next, docNo, createdBy: userId } as never);
+      next++;
+    }
+  }
+  return `${(d.creates ?? []).length} new · ${(d.updates ?? []).length} changed${(d.adds ?? []).length ? ` · lines added to ${(d.adds ?? []).length} existing document(s)` : ""}${(d.merges ?? []).length ? ` · ${(d.merges ?? []).length} group(s) of existing documents merged` : ""}`;
 }
 
 /** Master: applied at once. Admin: waits for Master approval. Either way it is one all-or-nothing change in the log. */
 export async function requestExpUpload(user: User, data: ExpUploadData, before: Record<string, unknown>): Promise<ChangeResult> {
   if (user.role !== "admin" && user.role !== "master") return { ok: false, errors: {}, message: "Only Admin or Master can upload Exp." };
-  if (!data.creates.length && !data.updates.length) return { ok: false, errors: {}, message: "Nothing to add or change in this file." };
+  if (!data.creates.length && !data.updates.length && !(data.adds ?? []).length && !(data.merges ?? []).length) return { ok: false, errors: {}, message: "Nothing to add or change in this file." };
   try {
     return await submit(user, "exp", "bulk_upload", null, data as unknown as Record<string, unknown>, before);
   } catch (e) {

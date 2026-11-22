@@ -50,6 +50,27 @@
       "when": 1794773951520,
       "tag": "0006_nervous_ender_wiggin",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794994784042,
+      "tag": "0007_project_rows",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794996088471,
+      "tag": "0008_project_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795194605693,
+      "tag": "0009_exp_month",
+      "breakpoints": true
     }
   ]
 }

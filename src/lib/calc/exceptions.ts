@@ -12,6 +12,28 @@ export interface ExceptionGroup {
   count: number; rows: Row[]; // every matching row; the page shows the first ones, the download has all
 }
 
+/** Short remark per check, for the Remarks column of the Exp download. */
+export const EXCEPTION_REMARK: Record<string, string> = {
+  "exp-no-head": "Head missing", "exp-unknown-head": "Head not in Head master", "exp-bkg-missing": "BkgID not found in Bkg", "exp-collection-no-bkg": "Collection without BkgID",
+  "exp-no-date": "Pay date missing", "exp-no-amount": "Gross is zero or blank", "exp-no-mode": "Mode missing", "exp-expense-no-director": "Expense has no Director",
+  "exp-emp-unknown": "Emp not found in Emp master", "exp-no-emp": "Emp missing", "chq-missing": "Chq/UTR No, date or bank missing", "chq-duplicate": "Possible duplicate Chq/UTR entry",
+};
+/** id of an Exp row -> its remarks, from the exception groups. */
+export function exceptionRemarks(groups: ExceptionGroup[]): Map<number, string> {
+  const m = new Map<number, string[]>();
+  for (const g of groups) {
+    if (g.kind !== "exp") continue;
+    for (const r of g.rows) {
+      const id = Number((r as Row).id);
+      if (!Number.isFinite(id)) continue;
+      const a = m.get(id) ?? [];
+      a.push(EXCEPTION_REMARK[g.key] ?? g.title);
+      m.set(id, a);
+    }
+  }
+  return new Map([...m].map(([k, v]) => [k, v.join("; ")]));
+}
+
 const baseDoc = (docNo: unknown) => t(docNo).replace(/-\d{1,3}[A-Z]?$/, "");
 
 export function findExceptions(bk: Row[], exps: (Row & { id?: number })[], empNames: Set<string>, heads: Set<string>): ExceptionGroup[] {
@@ -38,6 +60,8 @@ export function findExceptions(bk: Row[], exps: (Row & { id?: number })[], empNa
     exps.filter((e) => !t(e.Mode)));
   add("exp-expense-no-director", "Expenses with no Director", "The expense cannot be placed in a Director's P&L.", "medium", "exp",
     exps.filter((e) => t(e.ExpType) === "Expense" && !t(e.Director)));
+  add("exp-no-emp", "Exp lines with no Employee", "The Director and the expense split cannot be worked out.", "medium", "exp",
+    exps.filter((e) => !t(e.Emp)));
   add("exp-emp-unknown", "Exp lines whose Employee is not in Emp", "The Director and the expense split cannot be worked out.", "medium", "exp",
     exps.filter((e) => t(e.Emp) && !empNames.has(t(e.Emp))));
   add("chq-missing", "Cheque / UTR lines missing their instrument details", "A Chq line should carry the Chq / UTR number, its date and the bank.", "medium", "exp",

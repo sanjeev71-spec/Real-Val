@@ -1,6 +1,7 @@
 // Master data shapes shared by server and browser, plus the SCD auto-fill rules.
 import { isoToSerial, str, num } from "./calc/excel";
 import { Hierarchy, type EmpRow } from "./calc/hierarchy";
+import { COMPANY } from "./company";
 
 export interface MasterData {
   projects: { name: string; location: string | null; builder: string | null }[];
@@ -29,6 +30,15 @@ export function priceListFor(m: MasterData, project: unknown, date: unknown) {
   );
 }
 
+const t0 = (v: unknown) => String(v ?? "").trim();
+const sameText = (a: unknown, b: unknown) => t0(a).toLowerCase() === t0(b).toLowerCase();
+const distinct = (xs: (string | null)[]) => {
+  const seen = new Map<string, string>();
+  for (const x of xs) if (x && str(x) && !seen.has(str(x).toLowerCase())) seen.set(str(x).toLowerCase(), str(x));
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+};
+/** Project names of the Project Master (a project can have several builder / location rows). */
+export const projectNames = (m: MasterData) => distinct(m.projects.map((p) => p.name));
 /** Distinct employee names (Name~Code), for the Associate dropdown. */
 export function employeeNames(m: MasterData): string[] {
   return [...new Set(m.employees.map((e) => e.emp))].sort((a, b) => a.localeCompare(b));
@@ -36,7 +46,7 @@ export function employeeNames(m: MasterData): string[] {
 
 /**
  * Applies the SCD auto-fill rules.
- * fixed=true  (SCD form): price-list and master values always overwrite what was typed.
+ * fixed=true  (SCD form): price-list and master values always overwrite what was typed (not where COMPANY.manualMasters: there they only fill blanks).
  * fixed=false (bulk upload): only blanks are filled.
  * Branch is filled from the Associate's Emp row on the booking date when blank (it stays editable).
  */
@@ -44,13 +54,19 @@ export function applyLookups(input: FormData, m: MasterData, fixed: boolean): Fo
   const out: FormData = { ...input };
   const set = (k: string, v: string | number | null | undefined) => {
     if (v === undefined) return;
-    if (fixed || out[k] === null || out[k] === undefined || str(out[k]) === "") out[k] = v;
+    if ((fixed && !COMPANY.manualMasters) || out[k] === null || out[k] === undefined || str(out[k]) === "") out[k] = v;
   };
   if (out.BkgLoginDate && !out.BkgMonth) out.BkgMonth = out.BkgLoginDate;
   if (fixed) out.BkgMonth = out.BkgLoginDate ?? null;
 
   const proj = m.projects.find((p) => p.name.toLowerCase() === str(out.Project).toLowerCase());
-  if (proj) {
+  if (proj && COMPANY.manualMasters) {
+    // the Project Master gives the project's one Builder and Location: the form always takes them; an upload fills blanks and is checked against them
+    out.Project = proj.name; // the project is always written as in the Project Master (a different use of capitals is corrected)
+    const same = (a: unknown, b: string) => str(a as never).toLowerCase() === b.toLowerCase();
+    if (proj.builder) { if (fixed || same(out.Builder, proj.builder)) out.Builder = proj.builder; else set("Builder", proj.builder); }
+    if (proj.location) { if (fixed || same(out.ProjectLocation, proj.location)) out.ProjectLocation = proj.location; else set("ProjectLocation", proj.location); }
+  } else if (proj) {
     set("ProjectLocation", proj.location);
     set("Builder", proj.builder);
   }
