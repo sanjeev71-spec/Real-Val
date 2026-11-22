@@ -1,6 +1,6 @@
 import "server-only";
 import ExcelJS from "exceljs";
-import { BKG_COLUMNS, DATE_KEYS } from "@/lib/fields";
+import { BKG_COLUMNS, BKG_INPUT_KEYS, DATE_KEYS } from "@/lib/fields";
 import { CALC_CELL_COLOUR, CALC_COLOUR, EXP_DOWNLOAD_COLUMNS, EXP_GROUP_COL, EXP_REMARK_COL, FILL_COLOUR, REMARK_COLOUR, colNote, kindOfCol } from "@/lib/expLayout";
 import { sortBkgByDate } from "@/lib/bkgFilter";
 
@@ -20,8 +20,25 @@ export async function bkgWorkbook(rowsAny: Row[]): Promise<ArrayBuffer> {
       return [c, v ?? null];
     })));
   }
-  ws.getRow(1).font = { bold: true };
+  // Headings: light green = typed by hand (read by the Bkg upload), light grey = derived (calculated, ignored on upload)
+  const typed = new Set(BKG_INPUT_KEYS);
+  const hdr = ws.getRow(1);
+  hdr.font = { bold: true };
+  BKG_COLUMNS.forEach((c, i) => {
+    hdr.getCell(i + 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: typed.has(c) ? FILL_COLOUR : CALC_COLOUR } };
+  });
   ws.views = [{ state: "frozen", ySplit: 1 }];
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: BKG_COLUMNS.length } };
+
+  const help = wb.addWorksheet("Legend");
+  [
+    ["HOW TO READ THIS FILE"],
+    ["Light green headings = entered by hand on the booking (or filled from the masters when the booking is made). These are the columns the Bkg upload reads."],
+    ["Light grey headings = derived columns, calculated by the system (costing totals, Director, revenue, receipts, dues, revenue share). They are ignored on upload even if you change them."],
+  ].forEach((r) => help.addRow(r));
+  help.getRow(2).getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: FILL_COLOUR } };
+  help.getRow(3).getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CALC_COLOUR } };
+  help.getColumn(1).width = 140;
   return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
 }
 
