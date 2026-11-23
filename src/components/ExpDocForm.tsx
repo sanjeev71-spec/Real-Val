@@ -22,6 +22,8 @@ export interface ExpDocFormProps {
   initial?: { header: Record<string, V>; lines: DocLine[] };
 }
 
+/** Branch of a NEW document until another is typed (same default as the Exp upload). */
+const DEFAULT_BRANCH = "Noida";
 const HEADER_KEYS = ["payDate", "valueDate", "mode", "branch", "narration"] as const;
 const isChq = (l: DocLine) => String(l.mode ?? "").toLowerCase() === "chq";
 
@@ -42,9 +44,9 @@ export function ExpDocForm(p: ExpDocFormProps) {
   const router = useRouter();
   const today = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
   const editing = Boolean(p.docBase);
-  const [header, setHeader] = useState<Record<string, V>>(p.initial?.header ?? { docNo: "", payDate: today, valueDate: today, mode: null, branch: null, narration: null });
+  const [header, setHeader] = useState<Record<string, V>>(p.initial?.header ?? { docNo: "", payDate: today, valueDate: today, mode: null, branch: DEFAULT_BRANCH, narration: null });
   const [lines, setLines] = useState<DocLine[]>(
-    p.initial?.lines ?? [{ payDate: today, valueDate: today, rp: "Receipt", head: null, mode: null, branch: null, gross: null, gst: null, tds: null, bkgId: null, emp: null, project: null, narration: null, remarks: null }],
+    p.initial?.lines ?? [{ payDate: today, valueDate: today, rp: "Receipt", head: null, mode: null, branch: DEFAULT_BRANCH, gross: null, gst: null, tds: null, bkgId: null, emp: null, project: null, narration: null, remarks: null }],
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
