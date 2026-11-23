@@ -26,6 +26,8 @@ export interface ExpBulkCheck {
   creates: ExpDocData[]; updates: ExpUploadUpdate[]; adds: ExpUploadAdd[]; merges: ExpUploadMerge[]; before: { rows: Record<string, Record<string, unknown>> };
 }
 
+/** Branch of a NEW row whose Branch cell is blank (anything typed is kept as typed). Corrections of existing rows keep the stored Branch. */
+export const DEFAULT_BRANCH = "Noida";
 const key = (v: unknown) => String(v ?? "").trim().toLowerCase();
 const LABEL: Record<string, string> = {
   payDate: "Pay date", valueDate: "Value date", head: "Head", mode: "Mode", rp: "R/P", gross: "Gross", gst: "GST", tds: "TDS", branch: "Branch", bkgId: "BkgID", emp: "Emp", relatedEmpName: "RelatedEmpName", expMonth: "ExpMonth",
@@ -77,7 +79,7 @@ export async function checkExpUpload(raw: Record<string, unknown>[], opts: ExpBu
   const createRows: ExpBulkRow[] = [];
   for (const [i, r] of rows.entries()) {
     const ex = r.docNo ? existingBy.get(key(r.docNo)) : undefined;
-    if (!ex) { createRows.push(r); continue; }
+    if (!ex) { if (!r.line.branch) r.line.branch = DEFAULT_BRANCH; createRows.push(r); continue; } // new row: a blank Branch becomes the default
     r.kind = "unchanged";
     r.doc = entryLabel(ex);
     if (r.group) anchorList.set(key(r.group), [...(anchorList.get(key(r.group)) ?? []), { e: ex, r }]);
@@ -211,7 +213,7 @@ export async function expTemplateXlsx(): Promise<Buffer> {
     ["TO CORRECT EXISTING LINES: download the Exp list (or a Data exceptions check) from the site, change the green cells, and upload that file as it is. A row whose DocNo is an existing line is a correction of that line (DocNo identifies the line - do not change it). An entry that shows no DocNo in the list is identified by the number shown in its place (its row id) - keep that number in DocNo."],
     ["Blank cells keep the stored value. To empty a field on purpose, type [clear] in the cell. Calculated columns of the download (ExpType, SignedGross, Client, Director, Data Exception Remarks, Rcv_..., L0/L1 ...) are ignored."],
     ["You can mix corrections and new transactions in one file. Uploading does not delete anything."],
-    [`Required for new rows: PayDate, Head, Mode, R/P, Gross, and Emp. When BkgID is filled, a blank Emp and a blank Project are taken from the booking (type an Emp to use a different one). Up to ${EXP_BULK_MAX} rows per upload.`],
+    [`Branch: a new row with a blank Branch gets \"Noida\"; anything you type is kept. On a correction a blank cell keeps the stored Branch. Required for new rows: PayDate, Head, Mode, R/P, Gross, and Emp. When BkgID is filled, a blank Emp and a blank Project are taken from the booking (type an Emp to use a different one). Up to ${EXP_BULK_MAX} rows per upload.`],
     ["Dates: dd-mm-yyyy or yyyy-mm-dd. ValueDate defaults to PayDate. R/P: Receipt or Payment (a negative Gross is read as a Payment of that amount)."],
     ["Mode = Chq lines also need Purpose, PaymentMode (Cheque, RTGS, UPI...), Chq/UTR No and Chq/UTR Date. For other modes those columns are ignored."],
     ["BkgID must exist in Bkg. Emp must match the Emp sheet exactly, e.g. Name~Code. RelatedEmpName is free text (a note such as a builder or 'Need Detail')."],

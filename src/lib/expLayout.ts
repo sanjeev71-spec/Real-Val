@@ -23,5 +23,6 @@ export const colNote = (c: string): string =>
   c === EXP_REMARK_COL ? "Built in: what is missing or wrong in this entry. Ignored on upload."
   : c === EXP_GROUP_COL ? "Fill by hand. Rows with the same Group label become ONE document. A label that is also on an existing row (or an existing DocNo) adds the new rows to that document."
   : c === "ExpMonth" ? "Optional, yyyy-mm. Blank = built in from PayDate. A month typed here is kept as typed. Type [clear] to go back to the PayDate month."
+  : c === "Branch" ? "Fill by hand. A new row with a blank Branch gets Noida; anything typed is kept."
   : EXP_FILL_COLS.has(c) ? "Fill / correct by hand - read on upload."
   : "Built in (calculated) - ignored on upload even if changed.";
