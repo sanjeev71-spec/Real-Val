@@ -15,8 +15,8 @@ export interface PackRecipient { director: string; email: string }
 /** The mail address stored for each Director (latest Emp period that has one). */
 export async function packRecipientsAction(directors: string[]): Promise<PackRecipient[]> {
   await requireUser(["master"]);
-  const emps = currentPeriods(await employeesWithCalc());
   const all = await employeesWithCalc();
+  const emps = currentPeriods(all);
   return directors.map((director) => {
     const c = codeOf(director);
     const cur = emps.find((e) => codeOf(e.emp) === c)?.email?.trim();

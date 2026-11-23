@@ -36,17 +36,37 @@ export async function loadEmployees(db: DB): Promise<EmpRow[]> {
   return rows.map((r) => toEmpRow(r, today));
 }
 
-async function loadContext(db: DB) {
-  const [employees, expRaw, rc, ov, bk] = await Promise.all([
-    loadEmployees(db),
-    db.select({ bkgId: s.expEntries.bkgId, project: s.expEntries.project, head: s.expEntries.head, mode: s.expEntries.mode, rp: s.expEntries.rp, gross: s.expEntries.gross, gst: s.expEntries.gst, tds: s.expEntries.tds }).from(s.expEntries),
+/**
+ * Everything the calculations read, fetched once and shared: employees, bookings, Exp entries (documents kept together, latest
+ * pay date first), RC/RA, overrides and Exp heads. Reports used to each read these again (three reads of bookings, two of Exp).
+ */
+async function loadRawRaw() {
+  await ensureEmpDerived();
+  const db = await getDb();
+  const [emp, bk, exp, rc, ov, heads] = await Promise.all([
+    db.select().from(s.employees).orderBy(asc(s.employees.seq)),
+    db.select().from(s.bookings).orderBy(asc(s.bookings.bkgId)),
+    db.select().from(s.expEntries).orderBy(
+      sql`${s.expEntries.payDate} desc nulls last`,
+      // the lines of one document stay together (an old line and the lines added to it later are not scattered by their ids); documents still newest first
+      sql`max(${s.expEntries.id}) over (partition by coalesce(${s.expEntries.docBase}, ${s.expEntries.docNo}, ${s.expEntries.id}::text)) desc`,
+      sql`${s.expEntries.lineNo} asc nulls first`,
+      asc(s.expEntries.id),
+    ),
     db.select().from(s.rcRa),
     db.select().from(s.overrideRules),
-    db.select({ id: s.bookings.bkgId, project: sql<string>`${s.bookings.data}->>'Project'` }).from(s.bookings),
+    db.select().from(s.expHeads),
   ]);
+  return { emp, bk, exp, rc, ov, heads };
+}
+const loadRaw = () => memo("raw", loadRawRaw);
+
+async function loadContext() {
+  const { emp, exp: expRaw, rc, ov, bk } = await loadRaw();
+  const today = todaySerial();
+  const employees = emp.map((r) => toEmpRow(r, today));
   // Exp.Project comes from the booking when the entry has a BkgID (as in Excel)
-  const projById = new Map(bk.map((b) => [b.id.toUpperCase(), b.project]));
-  const exp = expRaw.map((e) => ({ ...e, project: (e.bkgId && projById.get(e.bkgId.toUpperCase())) ?? e.project }));
+  const projById = new Map(bk.map((b) => [b.bkgId.toUpperCase(), (b.data as Record<string, unknown>).Project == null ? null : String((b.data as Record<string, unknown>).Project)]));
   const overrides: OverrideRule[] = ov.map((o) => ({
     overrideEmployee: o.overrideEmployee, sharePct: o.sharePct, branch: o.branch, excludeDirector: o.excludeDirector,
     effectiveFrom: serial(o.effectiveFrom), effectiveTo: serial(o.effectiveTo), active: o.active,
@@ -54,7 +74,7 @@ async function loadContext(db: DB) {
   }));
   return {
     hierarchy: new Hierarchy(employees),
-    exp: exp.map((e) => ({ bkgId: e.bkgId, project: e.project, head: e.head, mode: e.mode, rp: e.rp, gross: e.gross, gst: e.gst, tds: e.tds })),
+    exp: expRaw.map((e) => ({ bkgId: e.bkgId, project: (e.bkgId && projById.get(e.bkgId.toUpperCase())) ?? e.project, head: e.head, mode: e.mode, rp: e.rp, gross: e.gross, gst: e.gst, tds: e.tds })),
     rcra: rc.map((r) => ({ rcra: r.name, ra: r.ra })),
     overrides,
   };
@@ -62,8 +82,7 @@ async function loadContext(db: DB) {
 
 /** The full Bkg table with every calculated column, in BkgID order. */
 async function computedBookingsRaw(): Promise<BookingRow[]> {
-  const db = await getDb();
-  const [rows, ctx] = await Promise.all([db.select().from(s.bookings).orderBy(asc(s.bookings.bkgId)), loadContext(db)]);
+  const [{ bk: rows }, ctx] = await Promise.all([loadRaw(), loadContext()]);
   return computeAll(rows.map((r) => ({ ...r.data, BkgID: r.bkgId }) as BookingInput), ctx);
 }
 
@@ -71,8 +90,8 @@ export const computedBookings = (): Promise<BookingRow[]> => memo("computedBooki
 
 /** Preview a single booking (e.g. a submission) as it would appear in Bkg. */
 export async function previewBooking(data: Record<string, unknown>): Promise<BookingRow> {
-  const db = await getDb();
-  const [ctx, ids] = await Promise.all([loadContext(db), db.select({ id: s.bookings.bkgId }).from(s.bookings)]);
+  const [ctx, { bk }] = await Promise.all([loadContext(), loadRaw()]);
+  const ids = bk.map((b) => ({ id: b.bkgId }));
   const { computeBooking } = await import("./calc/booking");
   return computeBooking(data as BookingInput, { ...ctx, allBkgIds: ids.map((x) => x.id) });
 }
@@ -171,12 +190,7 @@ export function currentPeriods<T extends { emp: string; changeDateFrom: string }
 }
 
 export async function expContext() {
-  const db = await getDb();
-  const [empRows, bookings, heads] = await Promise.all([
-    db.select().from(s.employees).orderBy(asc(s.employees.seq)),
-    db.select().from(s.bookings),
-    db.select().from(s.expHeads),
-  ]);
+  const { emp: empRows, bk: bookings, heads } = await loadRaw();
   const today = todaySerial();
   const H = new Hierarchy(empRows.map((r) => toEmpRow(r, today)));
   const bmap = new Map<string, BookingRef>();
@@ -204,14 +218,7 @@ export const expInputOf = (e: typeof s.expEntries.$inferSelect): ExpInput => ({
 
 /** Every Exp entry with its calculated columns, latest pay date first (entries without a date last); the lines of a document are kept together. */
 async function expWithCalcRaw(): Promise<(ExpComputedRow & { id: number })[]> {
-  const db = await getDb();
-  const [rows, ctx] = await Promise.all([db.select().from(s.expEntries).orderBy(
-    sql`${s.expEntries.payDate} desc nulls last`,
-    // the lines of one document stay together (an old line and the lines added to it later are not scattered by their ids); documents still newest first
-    sql`max(${s.expEntries.id}) over (partition by coalesce(${s.expEntries.docBase}, ${s.expEntries.docNo}, ${s.expEntries.id}::text)) desc`,
-    sql`${s.expEntries.lineNo} asc nulls first`,
-    asc(s.expEntries.id),
-  ), expContext()]);
+  const [{ exp: rows }, ctx] = await Promise.all([loadRaw(), expContext()]);
   return rows.map((e) => ({ id: e.id, ...computeExp(expInputOf(e), ctx) }));
 }
 
@@ -340,9 +347,7 @@ export const loadCore = () => memo("core", async () => ({ bk: await computedBook
 
 /** Everything the P&L reports read: computed bookings, computed Exp, and the Emp periods (cached for 30 s - it is a heavy read). */
 async function loadPnlDataRaw(): Promise<PnlData> {
-  await ensureEmpDerived();
-  const db = await getDb();
-  const [{ bk, exps }, emp] = await Promise.all([loadCore(), db.select().from(s.employees).orderBy(asc(s.employees.seq))]);
+  const [{ bk, exps }, { emp }] = await Promise.all([loadCore(), loadRaw()]);
   const today = todaySerial();
   const data: PnlData = {
     bookings: bk.map((r) => ({
