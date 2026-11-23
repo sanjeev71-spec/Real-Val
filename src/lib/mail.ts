@@ -8,6 +8,7 @@ export interface Mail {
   replyTo?: string;
   subject: string;
   html: string;
+  attachments?: { filename: string; content: Buffer }[];
 }
 
 let transport: ReturnType<typeof nodemailer.createTransport> | null = null;
@@ -30,6 +31,7 @@ export async function sendMail(m: Mail): Promise<void> {
     from: `"${COMPANY.name} (no-reply)" <${user}>`,
     to,
     cc: m.cc,
+    attachments: m.attachments,
     replyTo: m.replyTo ?? process.env.MASTER_EMAIL ?? undefined,
     subject: m.subject,
     html: `${m.html}<hr><p style="color:#888;font-size:12px">Automated message from the ${COMPANY.name} booking system. Please do not reply to this address.</p>`,
