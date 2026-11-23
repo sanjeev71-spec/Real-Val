@@ -117,16 +117,16 @@ export async function buildDirectorPack(inp: PackInput): Promise<Buffer> {
   title(ws2, [`Bkg Data - ${inp.director}`, periods[0],
     "DirectorRevenue + Incentives = DirectorRevenue + DirectorSplRevenue + SpinToWin + " + colName("IncentiveRV") + ". Director Share (ShareAmt) = DirectorRevenue x Director Sharing + DirectorSplRevenue + SpinToWin + " + colName("IncentiveRV") + ". Director Share RA = Director Share x RA%. Total Share adds the Override share.",
     "Basis: Chain = the Director is in the revenue-share chain; Override = the Director gets an override share only (revenue columns left blank)."]);
-  const bh = ["BkgMonth", "Client", "Project", "Form Status", "Area", "NetBSPPSF", "TotalChargesPSF", "TotalCostAmt", "RC/RA", "Recd%", "DSlab", "DirectorRevenue", "DirectorSplRevenue", "SpinToWin", "IncentivePOC", colName("IncentiveRV"), "IncentiveBuilder",
+  const bh = ["BkgMonth", "BkgID", "Emp", "Client", "Project", "Form Status", "Area", "NetBSPPSF", "TotalChargesPSF", "TotalCostAmt", "RC/RA", "Recd%", "DSlab", "DirectorRevenue", "DirectorSplRevenue", "SpinToWin", "IncentivePOC", colName("IncentiveRV"), "IncentiveBuilder",
     "DirectorRevenue + Incentives", "Director Revenue RA", "Director Sharing", "Director Share", "Director Share RA", "Override_Share", "Override_Share RA", "Total Share (incl. Override)", "Total Share RA (incl. Override)", "Basis"];
   header(ws2, 6, bh);
-  const SUMCOLS = new Set([7, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 22, 23, 24, 25]); // 0-based columns that get a total
+  const SUMCOLS = new Set([9, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 26, 27]); // 0-based columns that get a total
   const totals = new Array(bh.length).fill(0);
   for (const d of det) {
     const b = d.b;
     const c = d.chain;
     const vals: (string | number | Date | null)[] = [
-      asDate(b.BkgMonth), String(b.Client ?? ""), String(b.Project ?? ""), String(b.FormStatus ?? ""), num(b.Area), num(b.NetBSPPSF), num(b.TotalChargesPSF), c ? num(b.TotalCostAmt) : null,
+      asDate(b.BkgMonth), String(b.BkgID ?? ""), String(b.Emp ?? ""), String(b.Client ?? ""), String(b.Project ?? ""), String(b.FormStatus ?? ""), num(b.Area), num(b.NetBSPPSF), num(b.TotalChargesPSF), c ? num(b.TotalCostAmt) : null,
       String(b["RC/RA"] ?? ""), num(b["Recd%"]), num(b.DSlab),
       c ? num(b.DirectorRevenue) : null, c ? num(b.DirectorSplRevenue) : null, c ? num(b.SpinToWin) : null, c ? num(b.IncentivePOC) : null, c ? num(b.IncentiveRV) : null, c ? num(b.IncentiveBuilder) : null,
       c ? d.rev : null, c ? d.revRA : null, c ? d.sharing : null, c ? d.share : null, c ? d.shareRA : null,
@@ -135,16 +135,16 @@ export async function buildDirectorPack(inp: PackInput): Promise<Buffer> {
     if (d.sold) vals.forEach((v, i) => { if (SUMCOLS.has(i) && typeof v === "number") totals[i] += v; });
     const r = ws2.addRow(vals);
     r.getCell(1).numFmt = "mmm-yyyy";
-    [5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26].forEach((n) => (r.getCell(n).numFmt = NUM));
-    r.getCell(10).numFmt = "0.0%"; r.getCell(20).numFmt = "0.0%";
+    [7, 8, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 25, 26, 27, 28].forEach((n) => (r.getCell(n).numFmt = NUM));
+    r.getCell(12).numFmt = "0.0%"; r.getCell(22).numFmt = "0.0%";
   }
   const tr = ws2.addRow(bh.map((_, i) => (i === 0 ? "Total (Live + Not Live only)" : SUMCOLS.has(i) ? Math.round(totals[i]) : "")));
   tr.font = { bold: true };
   tr.eachCell((c, i) => { c.border = { top: { style: "thin" } }; if (i > 1) c.numFmt = NUM; });
-  ws2.getColumn(1).width = 11; ws2.getColumn(2).width = 28; ws2.getColumn(3).width = 28;
-  for (let c = 4; c <= bh.length; c++) ws2.getColumn(c).width = 14;
+  ws2.getColumn(1).width = 11; ws2.getColumn(2).width = 11; ws2.getColumn(3).width = 26; ws2.getColumn(4).width = 28; ws2.getColumn(5).width = 28;
+  for (let c = 6; c <= bh.length; c++) ws2.getColumn(c).width = 14;
   ws2.getColumn(bh.length).width = 18;
-  ws2.views = [{ state: "frozen", xSplit: 3, ySplit: 6 }];
+  ws2.views = [{ state: "frozen", xSplit: 4, ySplit: 6 }];
   ws2.autoFilter = { from: { row: 6, column: 1 }, to: { row: 6, column: bh.length } };
 
   // ---- 3. Exp data (ExpType Expense only, this Director, ValueDate in the exp period)
