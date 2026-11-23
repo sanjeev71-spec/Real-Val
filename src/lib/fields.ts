@@ -98,3 +98,6 @@ export const VIEW_SECTIONS: { title: string; keys: string[]; columns?: { key: st
   { title: "Receipts & dues", keys: ["SPD","FormRevised","PendDue","ChqAmt","RecdFromClient","FutDue","TotalRecdAmt","BuilderDep","OverRecd","Recd%","CommRecd","BillGSTTDS","CalcBasis","RecdNOC","RecdAgtBill","Recoverable","CommBilled","BillOS","","TotRecd"] },
   { title: "Revenue share", keys: ["RS_ChainCodes","RS_Depth",...[0,1,2,3,4].flatMap((k)=>[`L${k}_Emp`,`L${k}_Share%`,`L${k}_Share`,`L${k}_SharexRA`]),"Override_Emp","Override_Share%","Override_Share","Override_SharexRA"] },
 ];
+
+/** Name shown for a column (RealV shows every column under its own key). */
+export const colName = (k: string): string => k;

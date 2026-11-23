@@ -1,6 +1,7 @@
 // Individual P&L pack for one Director: 4 sheets (P&L summary TL-wise, Bkg Data, Exp Data, Employee Data) as an .xlsx.
 import ExcelJS from "exceljs";
 import { computeTlSummary, type PnlData } from "./calc/pnl";
+import { colName } from "./fields";
 import { codeOf, isoToSerial, num } from "./calc/excel";
 import type { BookingRow } from "./calc/booking";
 import type { employeesWithCalc } from "./data";
@@ -43,26 +44,58 @@ export async function buildDirectorPack(inp: PackInput): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const periods = [`Booking Period ${dmy(inp.bkgFrom)} to ${dmy(inp.bkgTo)}`, `Exp Period ${dmy(inp.expFrom)} to ${dmy(inp.expTo)}`];
 
+  // ---- Bkg detail first: the summary is tied to it
+  // Per booking where this Director is in the revenue-share chain (Basis "Chain") or is the override employee (Basis "Override"):
+  //   DirectorRevenue + Incentives = DirectorRevenue + DirectorSplRevenue + SpinToWin + IncentiveTRPL
+  //   ShareAmt = DirectorRevenue x Director Sharing + DirectorSplRevenue + SpinToWin + IncentiveTRPL ; ShareAmt x RA% = ShareAmt x RA%
+  //   Override_Share / Override_Share x RA are added on top.
+  const isSold = (b: BookingRow) => SOLD.has(String(b.FormStatus ?? "").trim().toLowerCase());
+  const lowest = (b: BookingRow) => { for (let k = 0; k < 5; k++) { const e = String(b[`L${k}_Emp`] ?? ""); if (e) return codeOf(e).toLowerCase(); } return ""; };
+  interface Det { b: BookingRow; chain: boolean; override: boolean; sold: boolean; rev: number; sharing: number; share: number; shareRA: number; ovShare: number; ovRA: number; revRA: number }
+  const det: Det[] = inp.bookings
+    .filter((b) => { const m = isoToSerial(b.BkgMonth as string); return m !== null && m >= bf && m <= bt; })
+    .map((b) => {
+      const chain = [0, 1, 2, 3, 4].some((k) => sameCode(b[`L${k}_Emp`], dc));
+      const override = sameCode(b.Override_Emp, dc);
+      const ra = num(b["RA%"]);
+      let sharing = 0;
+      for (let k = 0; k < 5; k++) if (sameCode(b[`L${k}_Emp`], dc)) sharing += num(b[`L${k}_Share%`]);
+      const inc = num(b.DirectorSplRevenue) + num(b.SpinToWin) + num(b.IncentiveRV);
+      const rev = chain ? num(b.DirectorRevenue) + inc : 0;
+      const share = chain ? Math.round(num(b.DirectorRevenue) * sharing + inc) : 0;
+      const ovShare = override ? num(b.Override_Share) : 0;
+      return { b, chain, override, sold: isSold(b), rev, sharing, share, shareRA: Math.round(share * ra), ovShare, ovRA: override ? num(b.Override_SharexRA) : 0, revRA: chain ? num(b.DirectorRevenue) * ra : 0 };
+    })
+    .filter((d) => d.chain || d.override)
+    .sort((x, y) => String(x.b.BkgMonth).localeCompare(String(y.b.BkgMonth)));
+  const live = det.filter((d) => d.sold);
+  const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
+  const sumOf = (f: (d: Det) => number) => live.reduce((s, d) => s + f(d), 0);
+
   // ---- 1. P&L summary (TL-wise)
   // bookings follow the booking period, expenses and seat cost the exp period: compute the two halves separately
   const sb = computeTlSummary(inp.pnl, inp.director, bf, bt);
   const se = computeTlSummary(inp.pnl, inp.director, ef, et);
   const ws1 = wb.addWorksheet("P&L Summary");
-  title(ws1, [`P&L Summary TL-wise - ${inp.director}`, ...periods]);
-  const cols = sb.cols.map((c) => c.name);
+  title(ws1, [`P&L Summary TL-wise - ${inp.director}`, ...periods, "Bookings counted: Live and Not Live only. ShareAmt and ShareAmt x RA% include the Override share."]);
   // the TL columns of the two runs can differ (team in a different window): align on code
   const codes = [...new Set([...sb.cols, ...se.cols].map((c) => c.code))];
   const nameOf = new Map([...se.cols, ...sb.cols].map((c) => [c.code, c.name]));
   const at = (s: ReturnType<typeof computeTlSummary>, arr: number[]) => codes.map((c) => { const i = s.cols.findIndex((x) => x.code === c); return i < 0 ? 0 : arr[i]; });
-  void cols;
-  const revInc = at(sb, sb.revInc), share = at(sb, sb.share), shareRA = at(sb, sb.shareRA);
+  // revenue per TL: each booking's DirectorRevenue + Incentives sits with the TL at the bottom of its chain
+  const revInc = codes.map((c) => live.reduce((s, d) => (d.chain && lowest(d.b) === c.toLowerCase() ? s + d.rev : s), 0));
+  const share = at(sb, sb.share), shareRA = at(sb, sb.shareRA);
+  // the detail rounds ShareAmt per booking; keep the summary equal to it to the rupee by settling the rounding on the Director's own column
+  const own = codes.indexOf(dc.toLowerCase());
+  const settle = (arr: number[], target: number) => { const d = Math.round(target) - Math.round(sum(arr)); if (own >= 0 && Math.abs(d) <= 100) arr[own] += d; };
+  settle(share, sumOf((d) => d.share + d.ovShare));
+  settle(shareRA, sumOf((d) => d.shareRA + d.ovRA));
   const heads = se.heads;
   const exp: Record<string, number[]> = Object.fromEntries(heads.map((h) => [h, at(se, se.exp[h])]));
   const expTotal = codes.map((_, i) => heads.reduce((s, h) => s + exp[h][i], 0));
   const ff = codes.map((_, i) => share[i] - expTotal[i]);
   const pl = codes.map((_, i) => shareRA[i] - expTotal[i]);
-  const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
-  header(ws1, 5, ["", "Total", ...codes.map((c) => (nameOf.get(c) ?? c).split("~")[0])]);
+  header(ws1, 6, ["", "Total", ...codes.map((c) => (nameOf.get(c) ?? c).split("~")[0])]);
   const put = (label: string, vals: number[], bold = false) => {
     const r = ws1.addRow([label, Math.round(sum(vals)), ...vals.map(Math.round)]);
     if (bold) r.font = { bold: true };
@@ -77,42 +110,42 @@ export async function buildDirectorPack(inp: PackInput): Promise<Buffer> {
   for (const h of heads) put(h, exp[h]);
   ws1.getColumn(1).width = 34;
   for (let c = 2; c <= codes.length + 2; c++) ws1.getColumn(c).width = 16;
-  ws1.views = [{ state: "frozen", xSplit: 1, ySplit: 5 }];
+  ws1.views = [{ state: "frozen", xSplit: 1, ySplit: 6 }];
 
-  // ---- 2. Bkg data (bookings with the Director anywhere in the revenue-share chain)
+  // ---- 2. Bkg data
   const ws2 = wb.addWorksheet("Bkg Data");
-  title(ws2, [`Bkg Data - ${inp.director}`, periods[0], "Director Revenue RA = DirectorRevenue x RA%. Director Share = the Director's own slice of the booking (all levels held), Director Share RA = same x RA%."]);
-  const bh = ["BkgMonth", "Client", "Project", "Form Status", "Area", "NetBSPPSF", "TotalChargesPSF", "TotalCostAmt", "RC/RA", "Recd%", "DSlab", "DirectorRevenue", "DirectorSplRevenue", "SpinToWin", "IncentivePOC", "IncentiveRV", "IncentiveBuilder", "Director Revenue RA", "Director Sharing", "Director Share", "Director Share RA"];
-  header(ws2, 5, bh);
-  const rows = inp.bookings
-    .filter((b) => { const m = isoToSerial(b.BkgMonth as string); return m !== null && m >= bf && m <= bt; })
-    .filter((b) => [0, 1, 2, 3, 4].some((k) => sameCode(b[`L${k}_Emp`], dc)) || sameCode(b.Override_Emp, dc))
-    .sort((a, b) => String(a.BkgMonth).localeCompare(String(b.BkgMonth)));
+  title(ws2, [`Bkg Data - ${inp.director}`, periods[0],
+    "DirectorRevenue + Incentives = DirectorRevenue + DirectorSplRevenue + SpinToWin + " + colName("IncentiveRV") + ". Director Share (ShareAmt) = DirectorRevenue x Director Sharing + DirectorSplRevenue + SpinToWin + " + colName("IncentiveRV") + ". Director Share RA = Director Share x RA%. Total Share adds the Override share.",
+    "Basis: Chain = the Director is in the revenue-share chain; Override = the Director gets an override share only (revenue columns left blank)."]);
+  const bh = ["BkgMonth", "Client", "Project", "Form Status", "Area", "NetBSPPSF", "TotalChargesPSF", "TotalCostAmt", "RC/RA", "Recd%", "DSlab", "DirectorRevenue", "DirectorSplRevenue", "SpinToWin", "IncentivePOC", colName("IncentiveRV"), "IncentiveBuilder",
+    "DirectorRevenue + Incentives", "Director Revenue RA", "Director Sharing", "Director Share", "Director Share RA", "Override_Share", "Override_Share RA", "Total Share (incl. Override)", "Total Share RA (incl. Override)", "Basis"];
+  header(ws2, 6, bh);
+  const SUMCOLS = new Set([7, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 22, 23, 24, 25]); // 0-based columns that get a total
   const totals = new Array(bh.length).fill(0);
-  const SUMCOLS = new Set([7, 11, 12, 13, 14, 15, 16, 17, 19, 20]); // 0-based columns that get a total
-  for (const b of rows) {
-    let sharing = 0, sh = 0, sr = 0;
-    for (let k = 0; k < 5; k++) if (sameCode(b[`L${k}_Emp`], dc)) { sharing += num(b[`L${k}_Share%`]); sh += num(b[`L${k}_Share`]); sr += num(b[`L${k}_SharexRA`]); }
-    if (sameCode(b.Override_Emp, dc)) { sharing += num(b["Override_Share%"]); sh += num(b.Override_Share); sr += num(b.Override_SharexRA); }
-    const ra = num(b["RA%"]);
-    const vals: (string | number | Date)[] = [
-      asDate(b.BkgMonth), String(b.Client ?? ""), String(b.Project ?? ""), String(b.FormStatus ?? ""), num(b.Area), num(b.NetBSPPSF), num(b.TotalChargesPSF), num(b.TotalCostAmt),
-      String(b["RC/RA"] ?? ""), num(b["Recd%"]), num(b.DSlab), num(b.DirectorRevenue), num(b.DirectorSplRevenue), num(b.SpinToWin), num(b.IncentivePOC), num(b.IncentiveRV), num(b.IncentiveBuilder),
-      num(b.DirectorRevenue) * ra, sharing, sh, sr,
+  for (const d of det) {
+    const b = d.b;
+    const c = d.chain;
+    const vals: (string | number | Date | null)[] = [
+      asDate(b.BkgMonth), String(b.Client ?? ""), String(b.Project ?? ""), String(b.FormStatus ?? ""), num(b.Area), num(b.NetBSPPSF), num(b.TotalChargesPSF), c ? num(b.TotalCostAmt) : null,
+      String(b["RC/RA"] ?? ""), num(b["Recd%"]), num(b.DSlab),
+      c ? num(b.DirectorRevenue) : null, c ? num(b.DirectorSplRevenue) : null, c ? num(b.SpinToWin) : null, c ? num(b.IncentivePOC) : null, c ? num(b.IncentiveRV) : null, c ? num(b.IncentiveBuilder) : null,
+      c ? d.rev : null, c ? d.revRA : null, c ? d.sharing : null, c ? d.share : null, c ? d.shareRA : null,
+      d.ovShare, d.ovRA, d.share + d.ovShare, d.shareRA + d.ovRA, c && d.override ? "Chain + Override" : c ? "Chain" : "Override",
     ];
-    if (SOLD.has(String(b.FormStatus ?? "").trim().toLowerCase())) vals.forEach((v, i) => { if (SUMCOLS.has(i) && typeof v === "number") totals[i] += v; });
+    if (d.sold) vals.forEach((v, i) => { if (SUMCOLS.has(i) && typeof v === "number") totals[i] += v; });
     const r = ws2.addRow(vals);
     r.getCell(1).numFmt = "mmm-yyyy";
-    [5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21].forEach((c) => (r.getCell(c).numFmt = NUM));
-    r.getCell(10).numFmt = "0.0%"; r.getCell(19).numFmt = "0.0%";
+    [5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26].forEach((n) => (r.getCell(n).numFmt = NUM));
+    r.getCell(10).numFmt = "0.0%"; r.getCell(20).numFmt = "0.0%";
   }
   const tr = ws2.addRow(bh.map((_, i) => (i === 0 ? "Total (Live + Not Live only)" : SUMCOLS.has(i) ? Math.round(totals[i]) : "")));
   tr.font = { bold: true };
   tr.eachCell((c, i) => { c.border = { top: { style: "thin" } }; if (i > 1) c.numFmt = NUM; });
   ws2.getColumn(1).width = 11; ws2.getColumn(2).width = 28; ws2.getColumn(3).width = 28;
   for (let c = 4; c <= bh.length; c++) ws2.getColumn(c).width = 14;
-  ws2.views = [{ state: "frozen", xSplit: 3, ySplit: 5 }];
-  ws2.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: bh.length } };
+  ws2.getColumn(bh.length).width = 18;
+  ws2.views = [{ state: "frozen", xSplit: 3, ySplit: 6 }];
+  ws2.autoFilter = { from: { row: 6, column: 1 }, to: { row: 6, column: bh.length } };
 
   // ---- 3. Exp data (ExpType Expense only, this Director, ValueDate in the exp period)
   const ws3 = wb.addWorksheet("Exp Data");
