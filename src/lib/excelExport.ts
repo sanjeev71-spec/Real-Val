@@ -1,18 +1,19 @@
 import "server-only";
 import ExcelJS from "exceljs";
-import { BKG_COLUMNS, BKG_INPUT_KEYS, DATE_KEYS } from "@/lib/fields";
+import { BKG_COLUMNS, BKG_INPUT_KEYS, DATE_KEYS, colName } from "@/lib/fields";
 import { CALC_CELL_COLOUR, CALC_COLOUR, EXP_DOWNLOAD_COLUMNS, EXP_GROUP_COL, EXP_REMARK_COL, FILL_COLOUR, REMARK_COLOUR, colNote, kindOfCol } from "@/lib/expLayout";
 import { sortBkgByDate } from "@/lib/bkgFilter";
+import type { employeesWithCalc } from "@/lib/data";
 
 // One place that builds the Bkg and Exp workbooks, so the Bkg, Exp and Data exceptions downloads always have the same format.
 type Row = Record<string, unknown>;
 
 /** Written in Bkg Date order with the latest booking at the bottom (the list on screen shows the latest on top). */
-export async function bkgWorkbook(rowsAny: Row[]): Promise<ArrayBuffer> {
+export async function bkgWorkbook(rowsAny: Row[], into?: ExcelJS.Workbook): Promise<ArrayBuffer> {
   const rows = sortBkgByDate(rowsAny, "asc");
-  const wb = new ExcelJS.Workbook();
+  const wb = into ?? new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Bkg");
-  ws.columns = BKG_COLUMNS.map((c) => ({ header: c, key: c, width: Math.max(10, c.length + 2), style: DATE_KEYS.has(c) ? { numFmt: "dd-mm-yyyy" } : {} }));
+  ws.columns = BKG_COLUMNS.map((c) => ({ header: colName(c), key: c, width: Math.max(10, c.length + 2), style: DATE_KEYS.has(c) ? { numFmt: "dd-mm-yyyy" } : {} }));
   for (const r of rows) {
     ws.addRow(Object.fromEntries(BKG_COLUMNS.map((c) => {
       const v = r[c];
@@ -29,6 +30,7 @@ export async function bkgWorkbook(rowsAny: Row[]): Promise<ArrayBuffer> {
   });
   ws.views = [{ state: "frozen", ySplit: 1 }];
   ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: BKG_COLUMNS.length } };
+  if (into) return new ArrayBuffer(0);
 
   const help = wb.addWorksheet("Legend");
   [
@@ -48,8 +50,8 @@ export async function bkgWorkbook(rowsAny: Row[]): Promise<ArrayBuffer> {
  * Emp and Project are the values typed on the entry (when `stored` is given), so an unchanged file uploads as no change.
  * An entry without a DocNo shows its row id there (as the Exp list does); typing that number back identifies the entry on upload.
  */
-export async function expWorkbook(rowsNewestFirst: Row[], remarks: Map<number, string> = new Map(), stored?: Map<number, { emp: string | null; project: string | null }>): Promise<ArrayBuffer> {
-  const wb = new ExcelJS.Workbook();
+export async function expWorkbook(rowsNewestFirst: Row[], remarks: Map<number, string> = new Map(), stored?: Map<number, { emp: string | null; project: string | null }>, into?: ExcelJS.Workbook): Promise<ArrayBuffer> {
+  const wb = into ?? new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Exp");
   const dates = new Set(["PayDate", "ValueDate", "Chq/UTR Date"]);
   ws.columns = EXP_DOWNLOAD_COLUMNS.map((c) => {
@@ -80,6 +82,7 @@ export async function expWorkbook(rowsNewestFirst: Row[], remarks: Map<number, s
   });
   ws.views = [{ state: "frozen", ySplit: 1, xSplit: 3 }];
   ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: EXP_DOWNLOAD_COLUMNS.length } };
+  if (into) return new ArrayBuffer(0);
 
   const help = wb.addWorksheet("Legend");
   [
@@ -93,6 +96,63 @@ export async function expWorkbook(rowsNewestFirst: Row[], remarks: Map<number, s
   ].forEach((r) => help.addRow(r));
   help.getColumn(1).width = 160;
   return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
+}
+
+/** Emp table in the same column layout as the Excel Emp sheet (contains personal data: Master and HR only). */
+export async function empWorkbook(rows: Awaited<ReturnType<typeof employeesWithCalc>>, into?: ExcelJS.Workbook): Promise<ArrayBuffer> {
+  const cols: [string, (r: (typeof rows)[number]) => unknown][] = [
+    // combined file only: typed columns that make a row an Emp upload action (blank Action = reference row, ignored on upload)
+    ...(into ? ([["Action", () => null], ["Emp Code", (r) => r.emp.split("~")[1] ?? ""], ["Name", () => null], ["Effective From", () => null], ["Exit Date", () => null], ["Reportees Move To", () => null]] as [string, (r: (typeof rows)[number]) => unknown][]) : []),
+    ["Applicable", (r) => r.applicable], ["ManMonths", (r) => r.calc.manMonths], ["SeatCost", (r) => r.calc.seatCost],
+    ["Emp", (r) => r.emp], ["ReportingHead", (r) => r.reportingHead], ["Director", (r) => r.calc.director],
+    ["Status", (r) => r.status], ["Gender", (r) => r.gender], ["Branch", (r) => r.branch], ["Type", (r) => r.type],
+    ["RevShare", (r) => r.revShare], ["ExpShare", (r) => r.expShare], ["DOJ", (r) => r.doj],
+    ["ChangeDateFrom", (r) => r.changeDateFrom], ["ChangeDateTo", (r) => r.changeDateTo ?? new Date().toISOString().slice(0, 10)],
+    ["DOExit/Change", (r) => r.exitDate], ["DaysWorked", (r) => r.calc.daysWorked], ["Company", (r) => r.company],
+    ["Designation", (r) => r.designation], ["Department", (r) => r.department], ["Remarks", (r) => r.remarks],
+    ["Mobile", (r) => r.mobile], ["Personal Mail ID", (r) => r.email], ["DOB", (r) => r.dob], ["Salary", (r) => r.salary],
+    ["MinSalary", (r) => r.minSalary], ["Father's Name", (r) => r.fatherName], ["Mother's Name", (r) => r.motherName],
+    ["Permanent Address", (r) => r.permanentAddress], ["Current Address", (r) => r.currentAddress], ["PAN", (r) => r.pan],
+    ["Aadhaar", (r) => r.aadhaar], ["Bank Name", (r) => r.bankName], ["BankA/cNo", (r) => r.bankAccount], ["IFSC", (r) => r.ifsc],
+    ["SeatChargeStart", (r) => r.seatChargeStart], ["Key", (r) => r.calc.key],
+  ];
+  const dateCols = new Set(["DOJ", "ChangeDateFrom", "ChangeDateTo", "DOExit/Change", "DOB", "SeatChargeStart", "Effective From", "Exit Date"]);
+  const wb = into ?? new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Emp");
+  ws.columns = cols.map(([h]) => ({ header: h, key: h, width: Math.max(10, h.length + 2), style: dateCols.has(h) ? { numFmt: "dd-mm-yyyy" } : {} }));
+  for (const r of rows)
+    ws.addRow(Object.fromEntries(cols.map(([h, f]) => {
+      const v = f(r);
+      return [h, dateCols.has(h) && typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00Z`) : v ?? null];
+    })));
+  // Headings: light green = typed by hand, light grey = derived by the system (same colours as the Bkg and Exp downloads)
+  const derived = new Set(["ManMonths", "SeatCost", "Director", "ChangeDateFrom", "ChangeDateTo", "DOExit/Change", "DaysWorked", "Key"]);
+  const hdr = ws.getRow(1);
+  hdr.font = { bold: true };
+  cols.forEach(([h], i) => { hdr.getCell(i + 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: derived.has(h) ? CALC_COLOUR : FILL_COLOUR } }; });
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
+  if (into) return new ArrayBuffer(0);
+  const help = wb.addWorksheet("Legend");
+  [
+    ["HOW TO READ THIS FILE"],
+    ["Light green headings = entered by hand (on the Emp forms or the Emp upload)."],
+    ["Light grey headings = derived by the system: Director, history dates (ChangeDateFrom / ChangeDateTo / DOExit-Change), days worked, man-months, seat cost, key."],
+    ["One row per history period of each employee. To add employees or history rows, use the Emp upload template (Emp > Upload Emp) - this download is not uploaded as it is."],
+  ].forEach((r) => help.addRow(r));
+  help.getRow(2).getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: FILL_COLOUR } };
+  help.getRow(3).getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CALC_COLOUR } };
+  help.getColumn(1).width = 150;
+  return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
+}
+
+/** One file with the three tables as sheets Bkg, Exp and Emp (each keeps its own heading colours; no Legend sheets). */
+export async function combinedWorkbook(parts: { bkg: Row[]; exp: Row[]; emp: Awaited<ReturnType<typeof employeesWithCalc>>; remarks: Map<number, string>; stored?: Map<number, { emp: string | null; project: string | null }> }): Promise<Uint8Array> {
+  const out = new ExcelJS.Workbook();
+  await bkgWorkbook(parts.bkg, out);
+  await expWorkbook(parts.exp, parts.remarks, parts.stored, out);
+  await empWorkbook(parts.emp, out);
+  return new Uint8Array((await out.xlsx.writeBuffer()) as ArrayBuffer);
 }
 
 export const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";

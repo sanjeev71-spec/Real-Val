@@ -74,7 +74,7 @@ const heading = Object.fromEntries(EMP_UPLOAD_COLUMNS.map(([h, f]) => [h.toLower
 const headingOf = Object.fromEntries(EMP_UPLOAD_COLUMNS.map(([h, f]) => [f, h]));
 const show = (v: unknown) => (v === null || v === undefined || v === "" ? "" : String(v));
 
-export async function checkEmpUpload(rawRows: Record<string, unknown>[]): Promise<EmpUploadCheck> {
+export async function checkEmpUpload(rawRows: Record<string, unknown>[], rowNos?: number[]): Promise<EmpUploadCheck> {
   const warnings: string[] = [];
   const cols = new Set(rawRows.flatMap((r) => Object.keys(r)));
   const unknown = [...cols].filter((c) => c && !(c.trim().toLowerCase() in heading));
@@ -90,7 +90,7 @@ export async function checkEmpUpload(rawRows: Record<string, unknown>[]): Promis
       const t = asText(v);
       f[key] = String(t).toLowerCase() === CLEAR ? "" : t;
     }
-    return { row: i + 2, f };
+    return { row: rowNos?.[i] ?? i + 2, f };
   }).filter((p) => Object.keys(p.f).length > 0);
 
   const ctx = await empCtx();
@@ -161,6 +161,48 @@ export async function checkEmpUpload(rawRows: Record<string, unknown>[]): Promis
     });
   }
   return { rows, items, warnings };
+}
+
+const sameValue = (a: unknown, b: unknown) => {
+  const x = String(a ?? "").trim(), y = String(b ?? "").trim();
+  return x === y || (x !== "" && y !== "" && Number.isFinite(Number(x)) && Number.isFinite(Number(y)) && Number(x) === Number(y));
+};
+
+/**
+ * The Emp sheet of the combined Bkg/Exp/Emp file. It has the Emp download's columns plus typed Action, Emp Code, Name, Effective From,
+ * Exit Date and Reportees Move To. A row is read only when its Action is filled (blank = reference row). Cells that still hold the
+ * stored value are dropped, so a Change / Correct row carries just what was edited. Rows keep their sheet row number in messages.
+ */
+export async function adaptCombinedEmp(rows: Record<string, unknown>[]): Promise<{ rows: Record<string, unknown>[]; rowNos: number[]; warnings: string[] }> {
+  const warnings: string[] = [];
+  if (!rows.some((r) => "Action" in r)) return { rows: [], rowNos: [], warnings: ["The Emp sheet has no Action column, so nothing is applied from it (use the Emp column layout of the combined download)."] };
+  const ctx = await empCtx();
+  const out: Record<string, unknown>[] = [];
+  const rowNos: number[] = [];
+  rows.forEach((r, i) => {
+    const action = String(r.Action ?? "").trim();
+    if (!action) return;
+    const emp = String(r.Emp ?? "").trim();
+    const code = String(r["Emp Code"] ?? "").trim() || (emp.split("~")[1] ?? "");
+    const kind = ACTIONS[action.toLowerCase()];
+    const cur = ctx.current.find((c) => (c.emp.split("~")[1] ?? "").toLowerCase() === code.toLowerCase());
+    if (cur && kind && kind !== "create") {
+      const rowFrom = String(r.ChangeDateFrom ?? "").trim();
+      if (rowFrom && rowFrom !== cur.changeDateFrom) { warnings.push(`Row ${i + 2}: ${emp || code} - this is a history row, not the current one; ignored. Put the Action on the employee's latest row.`); return; }
+    }
+    const o: Record<string, unknown> = { Action: action, "Emp Code": code };
+    for (const [h, f] of EMP_UPLOAD_COLUMNS) {
+      if (h === "Action" || h === "Emp Code") continue;
+      const v = r[h];
+      if (blank(v)) continue;
+      if ((kind === "change" || kind === "correct") && cur && !["effectiveFrom", "exitDate", "moveTo", "name"].includes(f) && sameValue((cur as Record<string, unknown>)[f], v)) continue;
+      o[h] = v;
+    }
+    if (kind === "create" && blank(o.Name) && emp) o.Name = emp.split("~")[0];
+    out.push(o);
+    rowNos.push(i + 2);
+  });
+  return { rows: out, rowNos, warnings };
 }
 
 const fill = (argb: string): ExcelJS.Fill => ({ type: "pattern", pattern: "solid", fgColor: { argb } });

@@ -12,7 +12,7 @@ import { and, eq } from "drizzle-orm";
 import { normEmail, requestOtp, requireUser, signOut, verifyOtp, type Role } from "@/lib/auth";
 import { getDb, schema as s } from "@/lib/db";
 import * as wf from "@/lib/workflow";
-import { parseUpload } from "@/lib/bulk";
+import { parseCombined, parseUpload } from "@/lib/bulk";
 import { checkBkgUpload, type BkgUploadCounts, type BkgUploadRow } from "@/lib/bkgUpload";
 import { checkExpUpload, type ExpBulkCounts, type ExpBulkRow } from "@/lib/bulkExp";
 
@@ -154,7 +154,7 @@ export async function saveUserAction(input: { id?: number; email: string; name: 
 
 // ---- Exp / Emp change requests
 import * as ch from "@/lib/changes";
-import { checkEmpUpload, type EmpUploadRow } from "@/lib/empUpload";
+import { adaptCombinedEmp, checkEmpUpload, type EmpUploadRow } from "@/lib/empUpload";
 
 export async function expRequestAction(action: "create" | "update" | "delete", data: Record<string, unknown>, targetId?: number) {
   const user = await requireUser(["admin", "master"]);
@@ -426,5 +426,103 @@ export async function empUploadCommitAction(form: FormData): Promise<{ ok: boole
     return { ok: true, applied: r.applied ?? false, id: r.id, count: res.items.length };
   } catch (e) {
     return { ok: false, message: (e as Error).message };
+  }
+}
+
+// ---- Combined upload: one .xlsx with the sheets Emp, Bkg and Exp (Master only). Applied in that order, each as its own logged change.
+export interface AllSheetResult { sheet: "Emp" | "Bkg" | "Exp"; present: boolean; included: boolean; todo: number; summary: string; badRows: number; errors: string[]; warnings: string[] }
+export interface AllCheckResult { ok: boolean; message?: string; sheets?: AllSheetResult[] }
+export interface AllCommitResult { ok: boolean; message?: string; done?: { sheet: string; applied: boolean; id?: number; summary: string }[] }
+
+const allFlags = (form: FormData) => ({
+  Emp: form.get("includeEmp") === "1", Bkg: form.get("includeBkg") === "1", Exp: form.get("includeExp") === "1",
+  allowAdd: form.get("allowAdd") === "1", allowUpdate: form.get("allowUpdate") === "1",
+});
+const errList = (rows: { row: number; errors: Record<string, string> }[]) => {
+  const bad = rows.filter((r) => Object.keys(r.errors).length);
+  return { badRows: bad.length, errors: bad.slice(0, 25).map((r) => `Row ${r.row}: ${Object.entries(r.errors).map(([k, v]) => `${k}: ${v}`).join(" · ")}`) };
+};
+async function readCombined(form: FormData) {
+  const f = form.get("file");
+  if (!(f instanceof File) || f.size === 0) throw new Error("Choose the combined .xlsx file");
+  if (!/\.xlsx$/i.test(f.name)) throw new Error("The combined upload needs an .xlsx file with the sheets Bkg, Exp and Emp");
+  if (f.size > 5_500_000) throw new Error("File is larger than 5.5 MB - keep only the rows you changed or added");
+  return { name: f.name, ...(await parseCombined(await f.arrayBuffer())) };
+}
+
+export async function allUploadCheckAction(form: FormData): Promise<AllCheckResult> {
+  await requireUser(["master"]);
+  try {
+    const fl = allFlags(form);
+    const file = await readCombined(form);
+    const sheets: AllSheetResult[] = [];
+    const empty = (sheet: AllSheetResult["sheet"]): AllSheetResult => ({ sheet, present: false, included: false, todo: 0, summary: "no such sheet (or no rows) in the file", badRows: 0, errors: [], warnings: [] });
+    if (!file.emp && !file.bkg && !file.exp) throw new Error("No sheet named Bkg, Exp or Emp with rows was found in the file");
+
+    if (!file.emp) sheets.push(empty("Emp"));
+    else if (!fl.Emp) sheets.push({ ...empty("Emp"), present: true, summary: `${file.emp.length} row(s) - left out` });
+    else {
+      const a = await adaptCombinedEmp(file.emp);
+      const r = await checkEmpUpload(a.rows, a.rowNos);
+      sheets.push({ sheet: "Emp", present: true, included: true, todo: r.items.length, summary: `${r.items.length} change(s) from ${r.rows.length} row(s) with an Action`, ...errList(r.rows), warnings: [...a.warnings, ...r.warnings] });
+    }
+    if (!file.bkg) sheets.push(empty("Bkg"));
+    else if (!fl.Bkg) sheets.push({ ...empty("Bkg"), present: true, summary: `${file.bkg.length} row(s) - left out` });
+    else {
+      const r = await checkBkgUpload(file.bkg, { allowAdd: fl.allowAdd, allowUpdate: fl.allowUpdate });
+      sheets.push({ sheet: "Bkg", present: true, included: true, todo: r.counts.added + r.counts.changed, summary: `${r.counts.added} new · ${r.counts.changed} changed · ${r.counts.unchanged} unchanged`, ...errList(r.rows), warnings: r.warnings });
+    }
+    if (!file.exp) sheets.push(empty("Exp"));
+    else if (!fl.Exp) sheets.push({ ...empty("Exp"), present: true, summary: `${file.exp.length} row(s) - left out` });
+    else {
+      const r = await checkExpUpload(file.exp, { allowAdd: fl.allowAdd, allowUpdate: fl.allowUpdate });
+      sheets.push({ sheet: "Exp", present: true, included: true, todo: r.counts.newLines + r.counts.changed, summary: `${r.counts.newLines} new line(s) in ${r.counts.newDocs} document(s) · ${r.counts.changed} changed · ${r.counts.unchanged} unchanged`, ...errList(r.rows), warnings: r.warnings });
+    }
+    return { ok: true, sheets };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+
+export async function allUploadCommitAction(form: FormData): Promise<AllCommitResult> {
+  const user = await requireUser(["master"]);
+  const done: NonNullable<AllCommitResult["done"]> = [];
+  try {
+    const fl = allFlags(form);
+    const file = await readCombined(form);
+    const fail = (sheet: string, message: string): AllCommitResult => ({ ok: false, message: `${sheet}: ${message}${done.length ? ` (already applied: ${done.map((d) => d.sheet).join(", ")})` : ""}`, done });
+    // Emp first, so that the Bkg and Exp checks below see the new employees
+    if (fl.Emp && file.emp) {
+      const a = await adaptCombinedEmp(file.emp);
+      const res = await checkEmpUpload(a.rows, a.rowNos);
+      if (res.rows.some((r) => Object.keys(r.errors).length)) return fail("Emp", "some rows have errors - check again");
+      if (res.items.length) {
+        const r = await ch.requestEmpUpload(user, file.name, res.items);
+        if (!r.ok) return fail("Emp", r.message ?? "could not save");
+        done.push({ sheet: "Emp", applied: r.applied ?? false, id: r.id, summary: `${res.items.length} change(s)` });
+      }
+    }
+    if (fl.Bkg && file.bkg) {
+      const res = await checkBkgUpload(file.bkg, { allowAdd: fl.allowAdd, allowUpdate: fl.allowUpdate });
+      if (res.rows.some((r) => Object.keys(r.errors).length)) return fail("Bkg", "some rows have errors - check again");
+      if (res.counts.added + res.counts.changed) {
+        const r = await ch.requestBkgUpload(user, { fileName: file.name, creates: res.creates, updates: res.updates });
+        if (!r.ok) return fail("Bkg", r.message ?? "could not save");
+        done.push({ sheet: "Bkg", applied: r.applied ?? false, id: r.id, summary: `${res.counts.added} new, ${res.counts.changed} changed` });
+      }
+    }
+    if (fl.Exp && file.exp) {
+      const res = await checkExpUpload(file.exp, { allowAdd: fl.allowAdd, allowUpdate: fl.allowUpdate });
+      if (res.rows.some((r) => Object.keys(r.errors).length)) return fail("Exp", "some rows have errors - check again");
+      if (res.counts.newLines + res.counts.changed) {
+        const r = await ch.requestExpUpload(user, { fileName: file.name, creates: res.creates, updates: res.updates, adds: res.adds, merges: res.merges }, res.before);
+        if (!r.ok) return fail("Exp", r.message ?? "could not save");
+        done.push({ sheet: "Exp", applied: r.applied ?? false, id: r.id, summary: `${res.counts.newLines} new line(s), ${res.counts.changed} changed` });
+      }
+    }
+    revalidatePath("/", "layout");
+    return { ok: true, done };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message, done };
   }
 }
