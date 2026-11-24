@@ -2,9 +2,10 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { loadPnlData, pnlDirectors, projectionActuals, projectionRows, toProjRow, todaySerial } from "@/lib/data";
 import { dashContext } from "@/lib/dashPage";
-import { BY_LABEL, isScoped, monthBuckets, perf, rank, type By } from "@/lib/calc/dashScope";
+import { BY_LABEL, inScope, isScoped, perf, quarterBuckets, rank, type By } from "@/lib/calc/dashScope";
 import { computeDirectorSummary, seatCostFor } from "@/lib/calc/pnl";
 import { projectionGrid } from "@/lib/calc/projection";
+import { serialToIso } from "@/lib/calc/excel";
 import { fmtNum } from "@/lib/format";
 import DashTabs from "@/components/DashTabs";
 import DashFilters from "@/components/DashFilters";
@@ -16,17 +17,17 @@ export const maxDuration = 60;
 export default async function Dashboard({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const user = await requireUser(["master", "admin"]);
   const c = await dashContext(await searchParams);
-  const { bks, exps, scope, from, to, fromIso, toIso, by } = c;
+  const { bks, exps, scope, from, to, fromIso, toIso } = c;
   const isMaster = user.role === "master";
   const scoped = isScoped(scope);
-  const sbk = bks.filter((b) => (!scope.director || b.director.toLowerCase() === scope.director.toLowerCase()) && (!scope.builder || b.builder.toLowerCase() === scope.builder.toLowerCase()) && (!scope.project || b.project.toLowerCase() === scope.project.toLowerCase()));
+  const sbk = bks.filter((b) => inScope(b, scope));
   const p = perf(sbk, from, to);
-  const months = monthBuckets(from, to);
+  const quarters = quarterBuckets(from, to);
 
   // ---- P&L: the Director-wise P&L when the view is the company or one Director; booking level when narrowed to a Builder / Project
   const official = isMaster && !scope.builder && !scope.project;
   let pl: { revInc: number; share: number; shareRA: number; seat: number; expense: number; ff: number; pl: number } | null = null;
-  let plMonths: { label: string; ff: number; pl: number }[] = [];
+  let plQuarters: { label: string; ff: number; pl: number }[] = [];
   if (official) {
     const [data, all] = await Promise.all([loadPnlData(), pnlDirectors()]);
     const list = scope.director ? all.filter((d) => d.toLowerCase() === scope.director.toLowerCase()) : all;
@@ -37,7 +38,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       return { revInc: a("revInc"), share: a("share"), shareRA: a("shareRA"), seat, expense: a("exp") - seat, ff: a("ff"), pl: a("pl") };
     };
     pl = sumFor(from, to);
-    plMonths = months.map((m) => { const r = sumFor(m.from, m.to); return { label: m.label, ff: r.ff, pl: r.pl }; });
+    plQuarters = quarters.map((m) => { const r = sumFor(m.from, m.to); return { label: m.label, ff: r.ff, pl: r.pl }; });
   }
   const commPaid = isMaster && !official
     ? (() => {
@@ -54,9 +55,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     if (prows.length) proj = projectionGrid(prows.map(toProjRow), actuals, year, "revenue", Math.min(to, todaySerial()), "emp").total;
   }
 
-  const rk = rank(sbk, by, from, to, 12);
+  // ---- rankings: every dimension on this page; a click narrows the dashboard to that Director / Builder / Project
   const nameMap = new Map(bks.map((b) => [b.director.split("~")[0], b.director]));
-  const drill = (name: string) => {
+  const drill = (by: By) => (name: string) => {
     if (name === "(none)") return undefined;
     if (by === "director") return c.href("/dashboard", { director: nameMap.get(name) ?? "" });
     if (by === "builder") return c.href("/dashboard", { builder: name, project: "" });
@@ -67,6 +68,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const bkgQ = `${scope.director ? `&Director=${encodeURIComponent(scope.director)}` : ""}${scope.project ? `&Project=${encodeURIComponent(scope.project)}` : ""}`;
   const linkOk = !scope.builder; // the Bkg list has no Builder filter
   const soldWin = linkOk ? `/bookings?sold=1&${win}${bkgQ}` : undefined;
+  const qWin = (m: { from: number; to: number }) => `from=${serialToIso(m.from)}&to=${serialToIso(m.to)}`;
 
   return (
     <div className="space-y-4">
@@ -75,7 +77,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <h1 className="h1">Dashboard</h1>
           <DashTabs active="perf" href={c.href} />
         </div>
-        <div className="ml-auto"><DashFilters from={fromIso} to={toIso} director={scope.director} builder={scope.builder} project={scope.project} by={by} directors={c.directors} builders={c.builders} projects={c.projects} /></div>
+        <div className="ml-auto"><DashFilters from={fromIso} to={toIso} director={scope.director} builder={scope.builder} project={scope.project} directors={c.directors} builders={c.builders} projects={c.projects} /></div>
       </div>
       <p className="text-sm text-[var(--muted)]">Showing <b className="text-[var(--ink)]">{c.label}</b> · bookings of {fromIso.split("-").reverse().join("-")} to {toIso.split("-").reverse().join("-")}</p>
 
@@ -111,41 +113,22 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       )}
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <ColumnChart title="Bookings per month" data={p.months.map((m) => ({ label: m.label, v: m.bookings, href: linkOk ? `/bookings?sold=1&month=${m.key}${bkgQ}` : undefined }))} colour="#2563eb" fmt={(v) => String(v)} />
-        <ColumnChart title="DirectorRevenue per month" data={p.months.map((m) => ({ label: m.label, v: m.revenue }))} colour="#16a34a" />
-        {plMonths.length > 0
-          ? <GroupedChart title="F&F and P&L per month" labels={plMonths.map((m) => m.label)} series={[{ name: "F&F", colour: "#2563eb", values: plMonths.map((m) => m.ff) }, { name: "P&L", colour: "#f59e0b", values: plMonths.map((m) => m.pl) }]} note="Expenses and seat cost counted in the month they fall in." />
-          : <ColumnChart title="ShareAmt per month" data={p.months.map((m) => ({ label: m.label, v: m.share }))} colour="#f59e0b" note="Booking level, before overrides." />}
+        <ColumnChart title="Bookings per quarter" data={p.months.map((m) => ({ label: m.label, v: m.bookings, href: linkOk ? `/bookings?sold=1&${qWin(m)}${bkgQ}` : undefined }))} colour="#2563eb" fmt={(v) => String(v)} />
+        <ColumnChart title="DirectorRevenue per quarter" data={p.months.map((m) => ({ label: m.label, v: m.revenue }))} colour="#16a34a" />
+        {plQuarters.length > 0
+          ? <GroupedChart title="F&F and P&L per quarter" labels={plQuarters.map((m) => m.label)} series={[{ name: "F&F", colour: "#2563eb", values: plQuarters.map((m) => m.ff) }, { name: "P&L", colour: "#f59e0b", values: plQuarters.map((m) => m.pl) }]} note="Expenses and seat cost counted in the quarter they fall in." />
+          : <ColumnChart title="ShareAmt per quarter" data={p.months.map((m) => ({ label: m.label, v: m.share }))} colour="#f59e0b" note="Booking level, before overrides." />}
         <Donut title="Booking status" slices={[{ label: "Live", v: p.live, colour: "#16a34a" }, { label: "Not Live", v: p.notLive, colour: "#f59e0b" }, { label: "Cancelled", v: p.cancelled, colour: "#ef4444" }]} centre={`${p.bookings + p.cancelled}`} note="Bookings of the period by form status." />
       </div>
 
       <section className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="h2 !mb-0">Compare by</h2>
-          {(Object.keys(BY_LABEL) as By[]).map((k) => (
-            <Link key={k} href={c.href("/dashboard", { by: k })} className={`btn ${k === by ? "btn-primary" : ""}`}>{BY_LABEL[k]}</Link>
+        <h2 className="h2 !mb-0">Ranking by Director, Builder, Project and Branch</h2>
+        <p className="text-xs text-[var(--muted)]">Bar = DirectorRevenue; after it: bookings | area | ShareAmt (booking level, before overrides). Click a bar to narrow the dashboard to it.</p>
+        <div className="grid grid-cols-1 gap-3">
+          {(Object.keys(BY_LABEL) as By[]).map((by) => (
+            <HBarChart key={by} wide title={`${BY_LABEL[by]}s by DirectorRevenue`} hrefOf={drill(by)}
+              rows={rank(sbk, by, from, to, 12).map((r) => ({ name: r.name, v: r.revenue, extra: `${fmtNum(r.count)} bkgs | ${fmtNum(Math.round(r.area))} sq ft | ShareAmt ${cr(r.share)}` }))} />
           ))}
-          <span className="text-xs text-[var(--muted)]">Click a bar to narrow the dashboard to it.</span>
-        </div>
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          <HBarChart title={`Top ${BY_LABEL[by]}s by DirectorRevenue`} rows={rk.map((r) => ({ name: r.name, v: r.revenue, sub: `${r.count} bookings` }))} hrefOf={drill} />
-          <div className="card overflow-x-auto">
-            <h2 className="h2">{BY_LABEL[by]} detail</h2>
-            <table className="table">
-              <thead><tr><th>{BY_LABEL[by]}</th><th className="text-right">Bookings</th><th className="text-right">Area</th><th className="text-right">Revenue</th><th className="text-right">ShareAmt</th></tr></thead>
-              <tbody>
-                {rk.map((r) => (
-                  <tr key={r.name}>
-                    <td>{drill(r.name) ? <Link className="link" href={drill(r.name)!}>{r.name}</Link> : r.name}</td>
-                    <td className="text-right">{fmtNum(r.count)}</td><td className="text-right">{fmtNum(Math.round(r.area))}</td>
-                    <td className="text-right">{cr(r.revenue)}</td><td className="text-right">{cr(r.share)}</td>
-                  </tr>
-                ))}
-                {!rk.length && <tr><td colSpan={5} className="text-[var(--muted)]">No data.</td></tr>}
-              </tbody>
-            </table>
-            <p className="mt-1 text-[11px] text-[var(--muted)]">ShareAmt here is booking level, before overrides.</p>
-          </div>
         </div>
       </section>
       <p className="text-xs text-[var(--muted)]">

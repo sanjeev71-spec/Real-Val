@@ -25,14 +25,18 @@ export const inScope = (b: DBk, sc: Scope) =>
   (!sc.director || lc(b.director) === lc(sc.director)) && (!sc.builder || lc(b.builder) === lc(sc.builder)) && (!sc.project || lc(b.project) === lc(sc.project));
 export const isScoped = (sc: Scope) => !!(sc.director || sc.builder || sc.project);
 
-/** The months of the window as buckets. */
-export function monthBuckets(from: number, to: number): { key: string; label: string; from: number; to: number }[] {
+/** Calendar quarter of a date, e.g. 2026-Q2. */
+export const qKey = (serial: number) => { const d = new Date(EPOCH + serial * 86400000); return `${d.getUTCFullYear()}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`; };
+
+/** The quarters of the window as buckets (the first and last are clipped to the window). */
+export function quarterBuckets(from: number, to: number): { key: string; label: string; from: number; to: number }[] {
   const out: { key: string; label: string; from: number; to: number }[] = [];
   const f = new Date(EPOCH + from * 86400000);
-  for (let t = Date.UTC(f.getUTCFullYear(), f.getUTCMonth(), 1); t <= EPOCH + to * 86400000; ) {
+  for (let t = Date.UTC(f.getUTCFullYear(), Math.floor(f.getUTCMonth() / 3) * 3, 1); t <= EPOCH + to * 86400000; ) {
     const d = new Date(t);
-    const next = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
-    out.push({ key: d.toISOString().slice(0, 7), label: `${MON[d.getUTCMonth()]} ${String(d.getUTCFullYear()).slice(2)}`, from: Math.max(from, Math.round((t - EPOCH) / 86400000)), to: Math.min(to, Math.round((next - EPOCH) / 86400000) - 1) });
+    const next = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 3, 1);
+    const q = Math.floor(d.getUTCMonth() / 3) + 1;
+    out.push({ key: `${d.getUTCFullYear()}-Q${q}`, label: `Q${q} ${String(d.getUTCFullYear()).slice(2)}`, from: Math.max(from, Math.round((t - EPOCH) / 86400000)), to: Math.min(to, Math.round((next - EPOCH) / 86400000) - 1) });
     t = next;
   }
   return out;
@@ -48,17 +52,17 @@ export function keyOf(b: DBk, by: By): string {
 
 export interface Perf {
   bookings: number; live: number; notLive: number; cancelled: number; cancelRate: number; area: number; revenue: number; share: number; shareRA: number;
-  months: { key: string; label: string; bookings: number; revenue: number; share: number }[];
+  months: { key: string; label: string; from: number; to: number; bookings: number; revenue: number; share: number }[];
 }
 export function perf(bks: DBk[], from: number, to: number): Perf {
   const w = bks.filter((b) => b.month >= from && b.month <= to);
   const sold = w.filter((b) => isSold(b.status));
-  const months = monthBuckets(from, to).map((m) => ({ key: m.key, label: m.label, bookings: 0, revenue: 0, share: 0 }));
+  const months = quarterBuckets(from, to).map((m) => ({ ...m, bookings: 0, revenue: 0, share: 0 }));
   const at = new Map(months.map((m) => [m.key, m]));
   let area = 0, revenue = 0, share = 0, shareRA = 0;
   for (const b of sold) {
     area += b.area; revenue += b.rev; share += b.share; shareRA += b.shareRA;
-    const m = at.get(ymOf(b.month));
+    const m = at.get(qKey(b.month));
     if (m) { m.bookings++; m.revenue += b.rev; m.share += b.share; }
   }
   const cancelled = w.filter((b) => isCancel(b.status)).length;
@@ -115,13 +119,13 @@ export function receiv(bks: DBk[], exps: DExp[], sc: Scope, from: number, to: nu
     if (b.pendDue > 0.5) dueBookings++;
     if (b.billOS > 0.5) billBookings++;
   }
-  const months = monthBuckets(from, to).map((m) => ({ key: m.key, label: m.label, recdClient: 0, formRevised: 0, brokerage: 0 }));
+  const months = quarterBuckets(from, to).map((m) => ({ key: m.key, label: m.label, recdClient: 0, formRevised: 0, brokerage: 0 }));
   const at = new Map(months.map((m) => [m.key, m]));
   let recdClient = 0, formRevised = 0, brokerage = 0, noc = 0, billed = 0;
   for (const e of exps) {
     if (e.date < from || e.date > to) continue;
     if (scoped && !ids.has(lc(e.bkgId))) continue;
-    const h = lc(e.head), mode = lc(e.mode), m = at.get(ymOf(e.date));
+    const h = lc(e.head), mode = lc(e.mode), m = at.get(qKey(e.date));
     if (h === "recd from client") { recdClient += e.signed; if (m) m.recdClient += e.signed; }
     else if (h === "form revised") { formRevised += e.signed; if (m) m.formRevised += e.signed; }
     else if (h === "brokerage recd") {

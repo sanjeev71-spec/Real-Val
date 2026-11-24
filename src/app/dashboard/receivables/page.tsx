@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { dashContext } from "@/lib/dashPage";
 import { dashDemand } from "@/lib/dashData";
-import { BY_LABEL, STAGES, inScope, keyOf, monthBuckets, rankReceiv, receiv, type By, type Stage } from "@/lib/calc/dashScope";
+import { BY_LABEL, STAGES, inScope, keyOf, quarterBuckets, rankReceiv, receiv, type By, type Stage } from "@/lib/calc/dashScope";
 import { fmtNum } from "@/lib/format";
 import DashTabs from "@/components/DashTabs";
 import DashFilters from "@/components/DashFilters";
@@ -17,29 +17,39 @@ const STAGE_NOTE: Record<Stage, string> = { "RA Close": "RA closed (25% to 100%)
 export default async function ReceivablesDashboard({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   await requireUser(["master", "admin"]);
   const c = await dashContext(await searchParams);
-  const { bks, exps, scope, from, to, fromIso, toIso, by } = c;
+  const { bks, exps, scope, from, to, fromIso, toIso } = c;
   const r = receiv(bks, exps, scope, from, to);
-  const months = monthBuckets(from, to);
+  const quarters = quarterBuckets(from, to);
 
   // pending demands: every live booking in the selection, as of today
   const ids = new Set(bks.filter((b) => inScope(b, scope)).map((b) => b.id.toLowerCase()));
   const byId = new Map(bks.map((b) => [b.id.toLowerCase(), b]));
   const demand = (await dashDemand()).filter((d) => ids.has(d.id.toLowerCase()));
   const dueNow = demand.reduce((s, d) => s + d.dueNow, 0), outstanding = demand.reduce((s, d) => s + d.outstanding, 0), dueCount = demand.filter((d) => d.dueNow > 0).length;
-  const dm = new Map<string, number>();
-  for (const d of demand) { const b = byId.get(d.id.toLowerCase()); if (b && d.dueNow > 0) { const k = keyOf(b, by); dm.set(k, (dm.get(k) ?? 0) + d.dueNow); } }
+  const demandBy = (by: By) => {
+    const m = new Map<string, number>();
+    for (const d of demand) { const b = byId.get(d.id.toLowerCase()); if (b && d.dueNow > 0) { const k = keyOf(b, by); m.set(k, (m.get(k) ?? 0) + d.dueNow); } }
+    return m;
+  };
 
-  const rr = rankReceiv(bks, exps, scope, by, from, to);
-  const top = (f: (x: (typeof rr)[number]) => number, n = 10) => rr.map((x) => ({ name: x.name, v: f(x) })).filter((x) => Math.abs(x.v) > 0.5).sort((a, b) => b.v - a.v).slice(0, n);
   const nameMap = new Map(bks.map((b) => [b.director.split("~")[0], b.director]));
-  const drill = (name: string) => {
+  const drill = (by: By) => (name: string) => {
     if (name === "(none)" || name === "(not linked)") return undefined;
     if (by === "director") return c.href("/dashboard/receivables", { director: nameMap.get(name) ?? "" });
     if (by === "builder") return c.href("/dashboard/receivables", { builder: name, project: "" });
     if (by === "project") return c.href("/dashboard/receivables", { project: name });
     return undefined;
   };
-  const demandRows = [...dm.entries()].map(([name, v]) => ({ name, v })).sort((a, b) => b.v - a.v).slice(0, 10);
+  // one chart per dimension: the bar is the due receivable, the other figures follow it separated by |
+  const rankRows = (by: By) => {
+    const dm = demandBy(by);
+    return rankReceiv(bks, exps, scope, by, from, to)
+      .map((x) => ({ ...x, demand: dm.get(x.name) ?? 0 }))
+      .filter((x) => [x.pendDue, x.billOS, x.collections, x.brokerage, x.demand].some((v) => Math.abs(v) > 0.5))
+      .sort((a, b) => b.pendDue - a.pendDue || b.collections - a.collections)
+      .slice(0, 12)
+      .map((x) => ({ name: x.name, v: x.pendDue, extra: `Collections ${cr(x.collections)} | Brokerage ${cr(x.brokerage)} | Billed OS ${cr(x.billOS)} | Demand due ${cr(x.demand)}` }));
+  };
   const win = `from=${fromIso}&to=${toIso}`;
   const stageTotal = STAGES.reduce((s, k) => s + r.stage[k].count, 0);
   const sold = r.stage["RA Close"].count + r.stage["RA Open"].count + r.stage["RC open"].count;
@@ -51,7 +61,7 @@ export default async function ReceivablesDashboard({ searchParams }: { searchPar
           <h1 className="h1">Dashboard</h1>
           <DashTabs active="rec" href={c.href} />
         </div>
-        <div className="ml-auto"><DashFilters from={fromIso} to={toIso} director={scope.director} builder={scope.builder} project={scope.project} by={by} directors={c.directors} builders={c.builders} projects={c.projects} /></div>
+        <div className="ml-auto"><DashFilters from={fromIso} to={toIso} director={scope.director} builder={scope.builder} project={scope.project} directors={c.directors} builders={c.builders} projects={c.projects} /></div>
       </div>
       <p className="text-sm text-[var(--muted)]">
         Showing <b className="text-[var(--ink)]">{c.label}</b>. Collections and brokerage are of {fromIso.split("-").reverse().join("-")} to {toIso.split("-").reverse().join("-")}; RA stage is for the bookings of that period; dues and demands are as of today.
@@ -70,25 +80,17 @@ export default async function ReceivablesDashboard({ searchParams }: { searchPar
       </div>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <GroupedChart title="Collections from client per month" stacked labels={months.map((m) => m.label)} series={[{ name: "Recd From Client", colour: "#2563eb", values: r.months.map((m) => m.recdClient) }, { name: "Form Revised", colour: "#f59e0b", values: r.months.map((m) => m.formRevised) }]} />
-        <ColumnChart title="Brokerage Recd per month" data={r.months.map((m) => ({ label: m.label, v: m.brokerage }))} colour="#16a34a" note="Excluding NOC and billing entries (shown in the tile)." />
+        <GroupedChart title="Collections from client per quarter" stacked labels={quarters.map((m) => m.label)} series={[{ name: "Recd From Client", colour: "#2563eb", values: r.months.map((m) => m.recdClient) }, { name: "Form Revised", colour: "#f59e0b", values: r.months.map((m) => m.formRevised) }]} />
+        <ColumnChart title="Brokerage Recd per quarter" data={r.months.map((m) => ({ label: m.label, v: m.brokerage }))} colour="#16a34a" note="Excluding NOC and billing entries (shown in the tile)." />
         <Donut title="RA stage (bookings of the period)" slices={STAGES.map((k) => ({ label: `${k} - ${STAGE_NOTE[k]}`, v: r.stage[k].count, colour: STAGE_COLOUR[k] }))} centre={`${stageTotal}`} note={`${sold} live bookings: RA Close ${stageTotal ? Math.round((r.stage["RA Close"].count / Math.max(1, sold)) * 100) : 0}%.`} />
-        <HBarChart title="Company revenue by RA stage" rows={STAGES.filter((k) => k !== "Other").map((k) => ({ name: k, v: r.stage[k].coRev, sub: `${r.stage[k].count} bookings` }))} note="CoRevenue of the bookings of the period in each stage." />
+        <HBarChart title="Company revenue by RA stage" rows={STAGES.filter((k) => k !== "Other").map((k) => ({ name: k, v: r.stage[k].coRev, extra: `${r.stage[k].count} bookings` }))} note="CoRevenue of the bookings of the period in each stage." />
       </div>
 
       <section className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="h2 !mb-0">Compare by</h2>
-          {(Object.keys(BY_LABEL) as By[]).map((k) => (
-            <Link key={k} href={c.href("/dashboard/receivables", { by: k })} className={`btn ${k === by ? "btn-primary" : ""}`}>{BY_LABEL[k]}</Link>
-          ))}
-          <span className="text-xs text-[var(--muted)]">Click a bar to narrow the dashboard to it.</span>
-        </div>
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          <HBarChart title={`Due receivables by ${BY_LABEL[by]}`} rows={top((x) => x.pendDue)} hrefOf={drill} />
-          <HBarChart title={`Collections from client by ${BY_LABEL[by]}`} rows={top((x) => x.collections)} hrefOf={drill} />
-          <HBarChart title={`Pending demands by ${BY_LABEL[by]}`} rows={demandRows} hrefOf={drill} note="1st net demand due now, incl. GST." />
-          <HBarChart title={`Brokerage Recd by ${BY_LABEL[by]}`} rows={top((x) => x.brokerage)} hrefOf={drill} />
+        <h2 className="h2 !mb-0">Ranking by Director, Builder, Project and Branch</h2>
+        <p className="text-xs text-[var(--muted)]">Bar = due receivables (PendDue, as of today); after it: collections | brokerage recd (of the period) | billed not received | 1st demand due. Click a bar to narrow the dashboard to it.</p>
+        <div className="grid grid-cols-1 gap-3">
+          {(Object.keys(BY_LABEL) as By[]).map((by) => <HBarChart key={by} wide title={`${BY_LABEL[by]}s by due receivables`} rows={rankRows(by)} hrefOf={drill(by)} />)}
         </div>
       </section>
       <p className="text-xs text-[var(--muted)]">

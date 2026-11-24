@@ -6,6 +6,7 @@ export const PALETTE = ["#2563eb", "#16a34a", "#f59e0b", "#ec4899", "#8b5cf6", "
 /** ₹ in crore / lakh, the long form for tiles. */
 export const cr = (v: number) => {
   const a = Math.abs(v), s = v < 0 ? "-" : "";
+  if (a < 0.5) return "₹0";
   return a >= 1e7 ? `${s}₹${(a / 1e7).toFixed(2)} cr` : a >= 1e5 ? `${s}₹${(a / 1e5).toFixed(1)} L` : `${s}₹${Math.round(a).toLocaleString("en-IN")}`;
 };
 /** The short form written on the charts. */
@@ -114,8 +115,11 @@ export function GroupedChart({ title, labels, series, stacked = false, fmt = sho
 }
 
 /** Ranked horizontal bars, every row in its own colour with the value at the end. */
-export function HBarChart({ title, rows, fmt = cr, note, hrefOf }: { title: string; rows: { name: string; v: number; sub?: string }[]; fmt?: (v: number) => string; note?: string; hrefOf?: (name: string) => string | undefined }) {
-  const W = 560, rowH = 24, labW = 150, valW = 78, n = rows.length;
+export function HBarChart({ title, rows, fmt = cr, note, hrefOf, wide = false }: { title: string; rows: { name: string; v: number; extra?: string }[]; fmt?: (v: number) => string; note?: string; hrefOf?: (name: string) => string | undefined; wide?: boolean }) {
+  // the value and the other figures of the row are written after the bar, separated by |
+  const text = (r: { v: number; extra?: string }) => (r.extra ? `${fmt(r.v)} | ${r.extra}` : fmt(r.v));
+  const W = wide ? 960 : 560, rowH = 24, labW = 150, n = rows.length;
+  const valW = Math.min(W * 0.62, Math.max(...rows.map((r) => text(r).length), 6) * 5.6 + 10);
   const max = Math.max(1, ...rows.map((r) => Math.abs(r.v)));
   return (
     <div className="card">
@@ -130,8 +134,8 @@ export function HBarChart({ title, rows, fmt = cr, note, hrefOf }: { title: stri
             const inner = (
               <g>
                 <text x={labW - 6} y={y + 15} textAnchor="end" fontSize="10.5" fill="currentColor">{label}</text>
-                <rect x={labW} y={y + 3} width={w} height={rowH - 8} rx={3} fill={r.v < 0 ? "#ef4444" : PALETTE[i % PALETTE.length]} opacity={0.92}><title>{`${r.name}: ${fmt(r.v)}${r.sub ? ` (${r.sub})` : ""}`}</title></rect>
-                <text x={labW + w + 5} y={y + 15} fontSize="10" fontWeight="600" fill="currentColor">{fmt(r.v)}</text>
+                <rect x={labW} y={y + 3} width={w} height={rowH - 8} rx={3} fill={r.v < 0 ? "#ef4444" : PALETTE[i % PALETTE.length]} opacity={0.92}><title>{`${r.name}: ${text(r)}`}</title></rect>
+                <text x={labW + w + 5} y={y + 15} fontSize="10" fontWeight="600" fill="currentColor">{text(r)}</text>
               </g>
             );
             return <g key={r.name}>{href ? <a href={href} style={{ cursor: "pointer" }}>{inner}</a> : inner}</g>;

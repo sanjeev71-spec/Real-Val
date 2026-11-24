@@ -3,7 +3,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 
 interface Props {
-  from: string; to: string; director: string; builder: string; project: string; by: string;
+  from: string; to: string; director: string; builder: string; project: string;
   directors: { name: string; active: boolean }[]; builders: string[]; projects: { name: string; builder: string }[];
 }
 
@@ -20,7 +20,6 @@ export default function DashFilters(p: Props) {
     if (next.director) q.set("director", next.director);
     if (next.builder) q.set("builder", next.builder);
     if (next.project) q.set("project", next.project);
-    if (p.by) q.set("by", p.by);
     router.push(`${path}?${q.toString()}`);
   };
   const projects = p.projects.filter((x) => !v.builder || x.builder.toLowerCase() === v.builder.toLowerCase());
