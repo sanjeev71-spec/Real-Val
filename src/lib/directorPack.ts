@@ -247,19 +247,5 @@ export async function buildDirectorPack(inp: PackInput): Promise<Buffer> {
   ws4.views = [{ state: "frozen", xSplit: 1, ySplit: 1 }];
   ws4.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: mh.length } };
 
-  const lg = wb.addWorksheet("Legend");
-  [
-    `Bkg Data / Exp Data / Employee Data - ${inp.director}`, periods[0], periods[1],
-    "Light green headings = typed columns, read by the Bkg upload (Upload Bkg, or the Bkg sheet of the Bkg + Exp + Emp file). Light grey headings = calculated, ignored on upload.",
-    "Blank cells keep the stored value; [clear] empties a field. Only bookings of this Director's chain or override are in the sheet, and the Total row is skipped on upload.",
-    "DirectorRevenue + Incentives = DirectorRevenue + DirectorSplRevenue + SpinToWin + " + colName("IncentiveRV") + ". Director Share (ShareAmt) = DirectorRevenue x Director Sharing + DirectorSplRevenue + SpinToWin + " + colName("IncentiveRV") + ". Director Share RA = Director Share x RA%. Total Share adds the Override share.",
-    "Comm Paid = Expenses - Income of the Exp rows of the booking (same BkgID) with Head Comm Paid, all Directors and dates.",
-    "Basis: Chain = the Director is in the revenue-share chain; Override = the Director gets an override share only (revenue columns left blank).",
-    "Totals of Bkg Data count Live and Not Live bookings only.",
-    "Exp Data: R/P and Gross are what the Exp upload reads (Income / Expenses are calculated). Employee Data: a row is applied on upload only when its Action (New, Change, Correct or Exit) is filled; use the Emp sheet of the Bkg + Exp + Emp file page. Total rows are skipped on upload.",
-  ].forEach((t, i) => { const c = lg.getCell(i + 1, 1); c.value = t; if (i === 0) c.font = { bold: true, size: 14 }; });
-  lg.getColumn(1).width = 150;
-  lg.getCell(3, 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: FILL_COLOUR } };
-
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
