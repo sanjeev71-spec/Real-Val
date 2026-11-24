@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/auth";
-import { pnlDirectors, todayIso } from "@/lib/data";
+import { pnlDirectorInfo, todayIso } from "@/lib/data";
 import DirectorPick from "@/components/DirectorPick";
 
 export const dynamic = "force-dynamic";
@@ -12,14 +12,14 @@ const monthEnd = (iso: string) => {
 
 export default async function DirectorPackPage() {
   await requireUser(["master"]);
-  const directors = await pnlDirectors();
+  const directors = await pnlDirectorInfo();
   const today = todayIso();
   return (
     <div className="space-y-4">
       <h1 className="h1">Director P&amp;L packs</h1>
       <p className="text-sm text-[var(--muted)]">
         One Excel file per Director with four sheets: <b>P&amp;L Summary</b> (TL-wise), <b>Bkg Data</b>, <b>Exp Data</b> (Expense heads only) and <b>Employee Data</b> (with seat cost).
-        Select one or more Directors. One Director downloads as .xlsx; several download as one .zip with a file each, ready to send.
+        Select one or more Directors. One Director downloads as .xlsx; several download as one .zip with a file each, ready to send. Inactive Directors are shown in red. Each P&amp;L Summary shows the Total, TL-wise and year-wise columns; TLs with nothing in any row are left out. <b>All-Directors summary</b> gives one sheet with a row per Director (the ticked ones, or all if none is ticked).
       </p>
       <form className="card space-y-4" method="get" action="/api/export/director-pack">
         <div className="flex flex-wrap items-end gap-3">

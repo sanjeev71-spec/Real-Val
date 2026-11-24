@@ -383,6 +383,22 @@ async function loadPnlDataRaw(): Promise<PnlData> {
 export const loadPnlData = (): Promise<PnlData> => memo("pnl", loadPnlDataRaw);
 
 /** Directors that appear in Emp (by code, with the latest spelling of the name), sorted by name. */
+/** Every P&L Director with whether they are still active (their latest Emp period is open and not Inactive). */
+export async function pnlDirectorInfo(): Promise<{ name: string; active: boolean }[]> {
+  const db = await getDb();
+  const rows = await db.select({ emp: s.employees.emp, from: s.employees.changeDateFrom, to: s.employees.changeDateTo, status: s.employees.status, seq: s.employees.seq }).from(s.employees);
+  const latest = new Map<string, (typeof rows)[number]>();
+  for (const r of rows) {
+    const c = (r.emp.split("~")[1] ?? "").toLowerCase();
+    const l = latest.get(c);
+    if (c && (!l || r.from > l.from || (r.from === l.from && r.seq > l.seq))) latest.set(c, r);
+  }
+  return (await pnlDirectors()).map((name) => {
+    const l = latest.get((name.split("~")[1] ?? "").toLowerCase());
+    return { name, active: !!l && l.to === null && String(l.status ?? "").toLowerCase() !== "inactive" };
+  });
+}
+
 export async function pnlDirectors(): Promise<string[]> {
   const db = await getDb();
   const rows = await db.select({ emp: s.employees.emp, director: s.employees.director }).from(s.employees);

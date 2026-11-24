@@ -4,13 +4,23 @@ import { packRecipientsAction, sendPacksAction, type PackRecipient, type PackSen
 
 const val = (id: string) => (document.getElementById(id) as HTMLInputElement | null)?.value ?? "";
 
-export default function DirectorPick({ directors }: { directors: string[] }) {
+type Tab = "all" | "active" | "inactive";
+const codeOf = (d: string) => (d.split("~")[1] ?? "").toLowerCase();
+
+export default function DirectorPick({ directors: info }: { directors: { name: string; active: boolean }[] }) {
+  const directors = info.map((d) => d.name);
+  const activeOf = new Map(info.map((d) => [d.name, d.active]));
+  const [tab, setTab] = useState<Tab>("all");
+  const shown = (d: string) => tab === "all" || (tab === "active") === !!activeOf.get(d);
+  // a different booking-from date for some Directors (all-Directors summary)
+  const arvind = directors.find((d) => codeOf(d) === "tv0174") ?? "";
+  const [ov, setOv] = useState<{ director: string; date: string }[]>(arvind ? [{ director: arvind, date: "2022-08-01" }] : []);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [rec, setRec] = useState<PackRecipient[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<PackSendResult[]>([]);
   const [msg, setMsg] = useState("");
-  const set = (all: boolean) => { setSel(all ? new Set(directors) : new Set()); setRec(null); };
+  const set = (all: boolean) => { setSel(all ? new Set(directors.filter(shown)) : new Set()); setRec(null); };
   const toggle = (d: string) => { setRec(null); setSel((p) => { const n = new Set(p); if (n.has(d)) n.delete(d); else n.add(d); return n; }); };
 
   const preview = async () => {
@@ -37,13 +47,37 @@ export default function DirectorPick({ directors }: { directors: string[] }) {
   return (
     <div>
       <div className="label flex items-center gap-3">Directors ({sel.size} selected)
+        <span className="flex gap-1">
+          {([["all", `All (${directors.length})`], ["active", `Active (${info.filter((d) => d.active).length})`], ["inactive", `Inactive (${info.filter((d) => !d.active).length})`]] as [Tab, string][]).map(([t, l]) => (
+            <button key={t} type="button" className={`btn ${tab === t ? "btn-primary" : ""}`} onClick={() => setTab(t)}>{l}</button>
+          ))}
+        </span>
         <button type="button" className="underline" onClick={() => set(true)}>Select all</button>
         <button type="button" className="underline" onClick={() => set(false)}>Clear</button>
       </div>
       <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
         {directors.map((d) => (
-          <label key={d} className="flex items-center gap-2 text-sm"><input type="checkbox" name="d" value={d} checked={sel.has(d)} onChange={() => toggle(d)} />{d}</label>
+          <label key={d} className={`flex items-center gap-2 text-sm ${shown(d) ? "" : "hidden"} ${activeOf.get(d) ? "" : "font-medium text-red-600"}`}><input type="checkbox" name="d" value={d} checked={sel.has(d)} onChange={() => toggle(d)} />{d}</label>
         ))}
+      </div>
+
+      <div className="mt-4 space-y-2 rounded border border-[var(--line)] p-3">
+        <div className="text-sm font-semibold">All-Directors summary (one sheet, a row per Director)</div>
+        <p className="text-xs text-[var(--muted)]">Uses the dates above. A Director listed here has bookings counted from their own date instead of Booking from.</p>
+        {ov.map((o, i) => (
+          <div key={i} className="flex flex-wrap items-center gap-2">
+            <select className="input w-64" value={o.director} onChange={(e) => setOv(ov.map((x, j) => (j === i ? { ...x, director: e.target.value } : x)))}>
+              {directors.map((d) => <option key={d}>{d}</option>)}
+            </select>
+            <input type="date" className="input w-44" value={o.date} onChange={(e) => setOv(ov.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)))} />
+            <button type="button" className="underline text-sm" onClick={() => setOv(ov.filter((_, j) => j !== i))}>Remove</button>
+            <input type="hidden" name="ov" value={`${codeOf(o.director)}|${o.date}`} disabled />
+          </div>
+        ))}
+        <div className="flex gap-2">
+          <button type="button" className="btn" onClick={() => setOv([...ov, { director: directors[0] ?? "", date: "2022-08-01" }])}>Add another Director</button>
+          <button type="submit" className="btn btn-primary" formAction="/api/export/director-summary" onClick={(e) => { const f = e.currentTarget.form; if (f) f.querySelectorAll('input[name="ov"]').forEach((i) => ((i as HTMLInputElement).disabled = false)); }}>Download all-Directors summary</button>
+        </div>
       </div>
 
       <div className="mt-4 space-y-2 rounded border border-[var(--line)] p-3">

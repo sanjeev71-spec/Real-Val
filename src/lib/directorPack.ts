@@ -1,6 +1,6 @@
 // Individual P&L pack for one Director: 4 sheets (P&L summary TL-wise, Bkg Data, Exp Data, Employee Data) as an .xlsx.
 import ExcelJS from "exceljs";
-import { computeTlSummary, type PnlData } from "./calc/pnl";
+import { computeTlSummary, serialOf, yearOf, type PnlData } from "./calc/pnl";
 import { BKG_INPUT_KEYS, NUMBER_KEYS, colName } from "./fields";
 import { CALC_COLOUR, EXP_FILL_COLS, FILL_COLOUR } from "./expLayout";
 import { codeOf, isoToSerial, num } from "./calc/excel";
@@ -39,22 +39,16 @@ function header(ws: ExcelJS.Worksheet, row: number, cols: string[]) {
 }
 const title = (ws: ExcelJS.Worksheet, lines: string[]) => lines.forEach((l, i) => { const c = ws.getCell(i + 1, 1); c.value = l; if (i === 0) c.font = { bold: true, size: 14 }; });
 
-export async function buildDirectorPack(inp: PackInput): Promise<Buffer> {
-  const dc = codeOf(inp.director);
-  const bf = isoToSerial(inp.bkgFrom)!, bt = isoToSerial(inp.bkgTo)!;
-  const ef = isoToSerial(inp.expFrom)!, et = isoToSerial(inp.expTo)!;
-  const wb = new ExcelJS.Workbook();
-  const periods = [`Booking Period ${dmy(inp.bkgFrom)} to ${dmy(inp.bkgTo)}`, `Exp Period ${dmy(inp.expFrom)} to ${dmy(inp.expTo)}`];
+const isSold = (b: BookingRow) => SOLD.has(String(b.FormStatus ?? "").trim().toLowerCase());
+export interface Det { b: BookingRow; chain: boolean; override: boolean; sold: boolean; rev: number; sharing: number; share: number; shareRA: number; ovShare: number; ovRA: number; revRA: number }
 
-  // ---- Bkg detail first: the summary is tied to it
-  // Per booking where this Director is in the revenue-share chain (Basis "Chain") or is the override employee (Basis "Override"):
-  //   DirectorRevenue + Incentives = DirectorRevenue + DirectorSplRevenue + SpinToWin + IncentiveTRPL
-  //   ShareAmt = DirectorRevenue x Director Sharing + DirectorSplRevenue + SpinToWin + IncentiveTRPL ; ShareAmt x RA% = ShareAmt x RA%
-  //   Override_Share / Override_Share x RA are added on top.
-  const isSold = (b: BookingRow) => SOLD.has(String(b.FormStatus ?? "").trim().toLowerCase());
-  const lowest = (b: BookingRow) => { for (let k = 0; k < 5; k++) { const e = String(b[`L${k}_Emp`] ?? ""); if (e) return codeOf(e).toLowerCase(); } return ""; };
-  interface Det { b: BookingRow; chain: boolean; override: boolean; sold: boolean; rev: number; sharing: number; share: number; shareRA: number; ovShare: number; ovRA: number; revRA: number }
-  const det: Det[] = inp.bookings
+/** The bookings of the booking period where the Director is in the revenue-share chain (Chain) or is the override employee (Override).
+ *  DirectorRevenue + Incentives = DirectorRevenue + DirectorSplRevenue + SpinToWin + IncentiveRV
+ *  ShareAmt = DirectorRevenue x Director Sharing + DirectorSplRevenue + SpinToWin + IncentiveRV ; ShareAmt x RA% = ShareAmt x RA%
+ *  Override_Share / Override_Share x RA are added on top. */
+export function bookingDetail(bookings: BookingRow[], director: string, bf: number, bt: number): Det[] {
+  const dc = codeOf(director);
+  return bookings
     .filter((b) => { const m = isoToSerial(b.BkgMonth as string); return m !== null && m >= bf && m <= bt; })
     .map((b) => {
       const chain = [0, 1, 2, 3, 4].some((k) => sameCode(b[`L${k}_Emp`], dc));
@@ -70,16 +64,32 @@ export async function buildDirectorPack(inp: PackInput): Promise<Buffer> {
     })
     .filter((d) => d.chain || d.override)
     .sort((x, y) => String(x.b.BkgMonth).localeCompare(String(y.b.BkgMonth)));
+}
+
+export async function buildDirectorPack(inp: PackInput): Promise<Buffer> {
+  const dc = codeOf(inp.director);
+  const bf = isoToSerial(inp.bkgFrom)!, bt = isoToSerial(inp.bkgTo)!;
+  const ef = isoToSerial(inp.expFrom)!, et = isoToSerial(inp.expTo)!;
+  const wb = new ExcelJS.Workbook();
+  const periods = [`Booking Period ${dmy(inp.bkgFrom)} to ${dmy(inp.bkgTo)}`, `Exp Period ${dmy(inp.expFrom)} to ${dmy(inp.expTo)}`];
+
+  // ---- Bkg detail first: the summary is tied to it
+  // Per booking where this Director is in the revenue-share chain (Basis "Chain") or is the override employee (Basis "Override"):
+  //   DirectorRevenue + Incentives = DirectorRevenue + DirectorSplRevenue + SpinToWin + IncentiveTRPL
+  //   ShareAmt = DirectorRevenue x Director Sharing + DirectorSplRevenue + SpinToWin + IncentiveTRPL ; ShareAmt x RA% = ShareAmt x RA%
+  //   Override_Share / Override_Share x RA are added on top.
+  const lowest = (b: BookingRow) => { for (let k = 0; k < 5; k++) { const e = String(b[`L${k}_Emp`] ?? ""); if (e) return codeOf(e).toLowerCase(); } return ""; };
+  const det = bookingDetail(inp.bookings, inp.director, bf, bt);
   const live = det.filter((d) => d.sold);
   const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
   const sumOf = (f: (d: Det) => number) => live.reduce((s, d) => s + f(d), 0);
 
-  // ---- 1. P&L summary (TL-wise)
+  // ---- 1. P&L summary: Total | TL-wise | Year-wise (one blank column between the three blocks). TLs whose rows are all zero are left out.
   // bookings follow the booking period, expenses and seat cost the exp period: compute the two halves separately
   const sb = computeTlSummary(inp.pnl, inp.director, bf, bt);
   const se = computeTlSummary(inp.pnl, inp.director, ef, et);
   const ws1 = wb.addWorksheet("P&L Summary");
-  title(ws1, [`P&L Summary TL-wise - ${inp.director}`, ...periods, "Bookings counted: Live and Not Live only. ShareAmt and ShareAmt x RA% include the Override share."]);
+  title(ws1, [`P&L Summary TL-wise and year-wise - ${inp.director}`, ...periods, "Bookings counted: Live and Not Live only. ShareAmt and ShareAmt x RA% include the Override share. TLs with nothing in any row are not shown."]);
   // the TL columns of the two runs can differ (team in a different window): align on code
   const codes = [...new Set([...sb.cols, ...se.cols].map((c) => c.code))];
   const nameOf = new Map([...se.cols, ...sb.cols].map((c) => [c.code, c.name]));
@@ -97,22 +107,45 @@ export async function buildDirectorPack(inp: PackInput): Promise<Buffer> {
   const expTotal = codes.map((_, i) => heads.reduce((s, h) => s + exp[h][i], 0));
   const ff = codes.map((_, i) => share[i] - expTotal[i]);
   const pl = codes.map((_, i) => shareRA[i] - expTotal[i]);
-  header(ws1, 6, ["", "Total", ...codes.map((c) => (nameOf.get(c) ?? c).split("~")[0])]);
-  const put = (label: string, vals: number[], bold = false) => {
-    const r = ws1.addRow([label, Math.round(sum(vals)), ...vals.map(Math.round)]);
-    if (bold) r.font = { bold: true };
+
+  // year-wise: bookings by the calendar year of BkgMonth (ties to Bkg Data), expenses and seat cost by the part of the exp period in that year
+  const years: number[] = [];
+  for (let y = yearOf(Math.min(bf, ef)); y <= yearOf(Math.max(bt, et)); y++) years.push(y);
+  const yr = years.map((y) => {
+    const dy = live.filter((d) => yearOf(isoToSerial(d.b.BkgMonth as string) ?? bf) === y);
+    const f = Math.max(ef, serialOf(y, 1, 1)), t = Math.min(et, serialOf(y, 12, 31));
+    const sy = f <= t ? computeTlSummary(inp.pnl, inp.director, f, t) : null;
+    const eh: Record<string, number> = Object.fromEntries(heads.map((h) => [h, sy?.total.exp[h] ?? 0]));
+    const expT = sy ? sy.total.expTotal : 0;
+    const sh = dy.reduce((s, d) => s + d.share + d.ovShare, 0), sr = dy.reduce((s, d) => s + d.shareRA + d.ovRA, 0);
+    return { revInc: dy.reduce((s, d) => s + d.rev, 0), share: sh, shareRA: sr, expTotal: expT, ff: sh - expT, pl: sr - expT, eh };
+  });
+
+  const lines: { label: string; vals: number[]; ys: number[]; bold: boolean }[] = [
+    { label: "F&F (ShareAmt - Paid Exp)", vals: ff, ys: yr.map((x) => x.ff), bold: true },
+    { label: "P&L (RA - Paid Exp)", vals: pl, ys: yr.map((x) => x.pl), bold: true },
+    { label: "DirectorRevenue + Incentives", vals: revInc, ys: yr.map((x) => x.revInc), bold: false },
+    { label: "ShareAmt", vals: share, ys: yr.map((x) => x.share), bold: false },
+    { label: "ShareAmt x RA%", vals: shareRA, ys: yr.map((x) => x.shareRA), bold: false },
+    { label: "Expense summary - TL wise", vals: expTotal, ys: yr.map((x) => x.expTotal), bold: true },
+    ...heads.map((h) => ({ label: h, vals: exp[h], ys: yr.map((x) => x.eh[h]), bold: false })),
+  ];
+  const keep = codes.map((_, i) => lines.some((l) => Math.round(l.vals[i]) !== 0));
+  const tl = codes.map((c, i) => ({ i, name: (nameOf.get(c) ?? c).split("~")[0] })).filter((x) => keep[x.i]);
+  const nTl = tl.length, tlStart = 4, yStart = tlStart + nTl + 1; // A label, B Total, C gap, TL columns, gap, years
+  header(ws1, 6, ["", "Total", "", ...tl.map((x) => x.name), "", ...years.map(String)]);
+  for (const c of [3, yStart - 1]) ws1.getCell(6, c).fill = { type: "pattern", pattern: "none" };
+  ws1.getCell(5, tlStart).value = "TL-wise"; ws1.getCell(5, yStart).value = "Year-wise (calendar year)";
+  ws1.getCell(5, tlStart).font = { bold: true }; ws1.getCell(5, yStart).font = { bold: true };
+  for (const l of lines) {
+    const r = ws1.addRow([l.label, Math.round(sum(l.vals)), null, ...tl.map((x) => Math.round(l.vals[x.i])), null, ...l.ys.map(Math.round)]);
+    if (l.bold) r.font = { bold: true };
     r.eachCell((c, i) => { if (i > 1) c.numFmt = NUM; });
-  };
-  put("F&F (ShareAmt - Paid Exp)", ff, true);
-  put("P&L (RA - Paid Exp)", pl, true);
-  put("DirectorRevenue + Incentives", revInc);
-  put("ShareAmt", share);
-  put("ShareAmt x RA%", shareRA);
-  put("Expense summary - TL wise", expTotal, true);
-  for (const h of heads) put(h, exp[h]);
-  ws1.getColumn(1).width = 34;
-  for (let c = 2; c <= codes.length + 2; c++) ws1.getColumn(c).width = 16;
-  ws1.views = [{ state: "frozen", xSplit: 1, ySplit: 6 }];
+  }
+  ws1.getColumn(1).width = 34; ws1.getColumn(2).width = 16; ws1.getColumn(3).width = 3; ws1.getColumn(yStart - 1).width = 3;
+  for (let c = tlStart; c < yStart - 1; c++) ws1.getColumn(c).width = 16;
+  for (let c = yStart; c < yStart + years.length; c++) ws1.getColumn(c).width = 16;
+  ws1.views = [{ state: "frozen", xSplit: 2, ySplit: 6 }];
 
   // ---- 2. Bkg data: heading in row 1 so the sheet can be uploaded as it is (Upload Bkg / the Bkg + Exp + Emp file).
   // Green headings = typed columns the upload reads; grey = calculated, ignored on upload (same colours as the Bkg download).
