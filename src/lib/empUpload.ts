@@ -28,8 +28,8 @@ export const EMP_UPLOAD_COLUMNS: [string, string, string][] = [
   ["Type", "type", "New, Change"],
   ["Designation", "designation", "New, Change, Correct"],
   ["Department", "department", "New, Change, Correct"],
-  ["RevShare", "revShare", "New, Change"],
-  ["ExpShare", "expShare", "New, Change"],
+  ["RevShare", "revShare", "New, Change, Correct (all history rows)"],
+  ["ExpShare", "expShare", "New, Change, Correct (all history rows)"],
   ["Applicable", "applicable", "New, Change, Correct"],
   ["SeatChargeStart", "seatChargeStart", "New, Change, Correct"],
   ["Company", "company", "New, Change"],
@@ -56,7 +56,7 @@ export const EMP_UPLOAD_COLUMNS: [string, string, string][] = [
 const ACTIONS: Record<string, EmpAction> = { new: "create", add: "create", change: "change", history: "change", correct: "correct", exit: "exit" };
 const LABEL: Record<EmpAction, string> = { create: "New", change: "Change", correct: "Correct", exit: "Exit" };
 const PERIOD_ONLY = new Set(["reportingHead", "branch", "type", "revShare", "expShare", "company", "status"]);
-const CORRECT_OK = new Set(["designation", "department", "applicable", "seatChargeStart", "remarks", "doj", "gender", "email", "mobile", "dob", "salary", "minSalary", "fatherName", "motherName", "permanentAddress", "currentAddress", "pan", "aadhaar", "bankName", "bankAccount", "ifsc"]);
+const CORRECT_OK = new Set(["revShare", "expShare", "designation", "department", "applicable", "seatChargeStart", "remarks", "doj", "gender", "email", "mobile", "dob", "salary", "minSalary", "fatherName", "motherName", "permanentAddress", "currentAddress", "pan", "aadhaar", "bankName", "bankAccount", "ifsc"]);
 const CHANGE_OK = new Set([...PERIOD_ONLY, "designation", "department", "applicable", "seatChargeStart", "remarks"]);
 
 export interface EmpUploadRow {
@@ -221,7 +221,7 @@ export async function prepareEmpUpload(rows: Record<string, unknown>[]): Promise
   const kept = a.rows.map((r, i) => ({ r, n: a.rowNos[i] })).filter((x) => Object.keys(x.r).some((k) => k !== "Action" && k !== "Emp Code"));
   const history = a.warnings.filter((w) => /history row/.test(w)).length;
   const warnings = a.warnings.filter((w) => !/history row/.test(w));
-  warnings.unshift(`No Action column: the file is read as corrections of each employee's latest row, only cells that differ from the stored value count (${kept.length} employee row(s) with a difference${history ? `; ${history} older history row(s) skipped` : ""}). RevShare, ExpShare, ReportingHead, Branch, Type, Company and Status cannot be corrected this way: use Action Change with an Effective From date.`);
+  warnings.unshift(`No Action column: the file is read as corrections of each employee's latest row, only cells that differ from the stored value count (${kept.length} employee row(s) with a difference${history ? `; ${history} older history row(s) skipped` : ""}). RevShare and ExpShare are set on every history row of the employee (from joining); ReportingHead, Branch, Type, Company and Status cannot be corrected this way: use Action Change with an Effective From date.`);
   return { rows: kept.map((x) => x.r), rowNos: kept.map((x) => x.n), warnings };
 }
 
@@ -256,7 +256,7 @@ export async function empTemplateXlsx(current: { emp: string; reportingHead: str
     ["Delete the 4 example rows (rows 2-5) before uploading. One row = one action on one employee; one row per employee per upload. Dates dd-mm-yyyy. Up to 300 rows."],
     ["Action = New: adds an employee. Needs Emp Code (new, unique), Name, ReportingHead (Name~Code) and DOJ. The first history row starts on the DOJ."],
     ["Action = Change: starts a NEW HISTORY ROW from 'Effective From' (the current row closes the day before). Fill only what changes: ReportingHead, Branch, Type, RevShare, ExpShare, Designation, Department, Applicable, SeatChargeStart, Company, Status, Remarks. Bookings before that date keep the old hierarchy."],
-    ["Action = Correct: fixes details on the CURRENT row without a new history row - personal details (DOJ, Mobile, PAN, Bank ...) and Designation, Department, Applicable, SeatChargeStart, Remarks. Reporting head or shares cannot be corrected this way; use Change."],
+    ["Action = Correct: fixes details on the CURRENT row without a new history row - personal details (DOJ, Mobile, PAN, Bank ...) and Designation, Department, Applicable, SeatChargeStart, Remarks. RevShare / ExpShare typed on a Correct row are set on EVERY history row of the employee, from joining (for a share that was not known earlier). Reporting head cannot be corrected this way; use Change."],
     ["Action = Exit: the employee leaves on 'Exit Date'. Everyone reporting to them moves one level up from the next day, or to 'Reportees Move To' (Name~Code) when filled."],
     ["Blank cells keep the stored value. To empty a field on purpose type [clear]. RevShare / ExpShare are fractions: 1 = 100%."],
     ["Green headings = typed by hand and read on upload (every column of this template). The 'Current employees' sheet is for reference only (grey = built in) and is not read."],
