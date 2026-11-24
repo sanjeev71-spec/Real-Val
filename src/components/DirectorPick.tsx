@@ -74,9 +74,11 @@ export default function DirectorPick({ directors: info }: { directors: { name: s
             <input type="hidden" name="ov" value={`${codeOf(o.director)}|${o.date}`} disabled />
           </div>
         ))}
+        {directors.filter(shown).map((d) => <input key={d} type="hidden" name="sd" value={d} disabled />)}
+        <p className="text-xs text-[var(--muted)]">Includes the Directors you have ticked; if none is ticked, all Directors of the tab you are on ({tab === "all" ? "All" : tab === "active" ? "Active" : "Inactive"}).</p>
         <div className="flex gap-2">
           <button type="button" className="btn" onClick={() => setOv([...ov, { director: directors[0] ?? "", date: "2022-08-01" }])}>Add another Director</button>
-          <button type="submit" className="btn btn-primary" formAction="/api/export/director-summary" onClick={(e) => { const f = e.currentTarget.form; if (f) f.querySelectorAll('input[name="ov"]').forEach((i) => ((i as HTMLInputElement).disabled = false)); }}>Download all-Directors summary</button>
+          <button type="submit" className="btn btn-primary" formAction="/api/export/director-summary" onClick={(e) => { const f = e.currentTarget.form; if (f) { f.querySelectorAll('input[name="ov"]').forEach((i) => ((i as HTMLInputElement).disabled = false)); f.querySelectorAll('input[name="sd"]').forEach((i) => ((i as HTMLInputElement).disabled = sel.size > 0)); } }}>Download all-Directors summary</button>
         </div>
       </div>
 

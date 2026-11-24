@@ -16,7 +16,7 @@ export interface SummaryInput {
 
 const NUM = '#,##0;(#,##0);"-"';
 const dmy = (iso: string) => `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`;
-const HEAD = ["Director", "Booking from", "F&F (ShareAmt - Paid Exp)", "P&L (RA - Paid Exp)", "DirectorRevenue + Incentives", "ShareAmt", "ShareAmt x RA%", "Expense", "Seat Cost"];
+const HEAD = ["Director", "Booking from", "F&F (ShareAmt - Paid Exp)", "P&L (RA - Paid Exp)", "DirectorRevenue + Incentives", "ShareAmt", "ShareAmt x RA%", "Expense (excl. Seat Cost)", "Seat Cost"];
 
 export async function buildDirectorSummary(inp: SummaryInput): Promise<Buffer> {
   const bt = isoToSerial(inp.bkgTo)!, ef = isoToSerial(inp.expFrom)!, et = isoToSerial(inp.expTo)!;
@@ -26,7 +26,7 @@ export async function buildDirectorSummary(inp: SummaryInput): Promise<Buffer> {
   ws.getCell(1, 1).value = "P&L Summary - all Directors";
   ws.getCell(1, 1).font = { bold: true, size: 14 };
   ws.getCell(2, 1).value = `Booking Period ${dmy(inp.bkgFrom)} to ${dmy(inp.bkgTo)}${own.length ? " (a different start for the Directors whose Booking from is shown)" : ""}`;
-  ws.getCell(3, 1).value = `Exp Period ${dmy(inp.expFrom)} to ${dmy(inp.expTo)}. Bookings counted: Live and Not Live only; ShareAmt and ShareAmt x RA% include the Override share. Expense includes Seat Cost.`;
+  ws.getCell(3, 1).value = `Exp Period ${dmy(inp.expFrom)} to ${dmy(inp.expTo)}. Bookings counted: Live and Not Live only; ShareAmt and ShareAmt x RA% include the Override share. Expense excludes Seat Cost (shown separately); F&F and P&L deduct both.`;
   const hr = ws.getRow(5);
   HEAD.forEach((h, i) => {
     const c = hr.getCell(i + 1);
@@ -43,8 +43,8 @@ export async function buildDirectorSummary(inp: SummaryInput): Promise<Buffer> {
     const shareRA = live.reduce((s, x) => s + x.shareRA + x.ovRA, 0);
     const rev = live.reduce((s, x) => s + x.rev, 0);
     const se = computeTlSummary(inp.pnl, d.name, ef, et);
-    const expense = se.total.expTotal, seat = se.total.exp["Seat Cost"] ?? 0;
-    const vals = [share - expense, shareRA - expense, rev, share, shareRA, expense, seat].map(Math.round);
+    const seat = se.total.exp["Seat Cost"] ?? 0, expTotal = se.total.expTotal, expense = expTotal - seat; // Expense shown without Seat Cost; F&F and P&L use both
+    const vals = [share - expTotal, shareRA - expTotal, rev, share, shareRA, expense, seat].map(Math.round);
     const r = ws.addRow([d.name, new Date(`${from}T00:00:00Z`), ...vals]);
     r.getCell(2).numFmt = "dd-mm-yyyy";
     r.getCell(2).alignment = { horizontal: "center" };

@@ -16,7 +16,9 @@ export async function GET(req: Request) {
   const bkgFrom = u.searchParams.get("bf"), bkgTo = u.searchParams.get("bt"), expFrom = u.searchParams.get("ef"), expTo = u.searchParams.get("et");
   if (!isoOk(bkgFrom) || !isoOk(bkgTo) || !isoOk(expFrom) || !isoOk(expTo)) return new Response("Choose all four dates", { status: 400 });
   const info = await pnlDirectorInfo();
-  const picked = new Set(u.searchParams.getAll("d"));
+  // ticked Directors; else the Directors of the tab that was open (sd); else everyone
+  const ticked = u.searchParams.getAll("d");
+  const picked = new Set(ticked.length ? ticked : u.searchParams.getAll("sd"));
   const directors = picked.size ? info.filter((d) => picked.has(d.name)) : info;
   // "CODE|yyyy-mm-dd": a Director whose bookings count from their own date
   const bkgFromFor: Record<string, string> = {};
