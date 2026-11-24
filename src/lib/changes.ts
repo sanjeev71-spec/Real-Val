@@ -399,13 +399,8 @@ async function applyEmpAction(tx: Tx, action: string, d: Record<string, unknown>
     return String(d.emp);
   }
   if (action === "correct") {
-    // RevShare / ExpShare are corrected on EVERY history row of the employee (a share that was not known when the employee joined), the rest on the current row only
-    const { revShare, expShare, ...rest } = d.changes as Record<string, unknown>;
-    if (Object.keys(rest).length) await tx.update(s.employees).set(rest as never).where(eq(s.employees.id, d.periodId as number));
-    const shares: Record<string, unknown> = {};
-    if ("revShare" in (d.changes as object)) shares.revShare = revShare;
-    if ("expShare" in (d.changes as object)) shares.expShare = expShare;
-    if (Object.keys(shares).length) await tx.update(s.employees).set(shares as never).where(eq(s.employees.emp, d.emp as string));
+    // the current row only (RevShare / ExpShare included); earlier history rows keep their values
+    await tx.update(s.employees).set(d.changes as never).where(eq(s.employees.id, d.periodId as number));
     return String(d.emp);
   }
   if (action === "exit") {
