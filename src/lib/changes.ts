@@ -1,4 +1,5 @@
 import "server-only";
+import { SHARED_PERSON_FIELDS } from "./empFields";
 import { and, asc, eq, inArray, max, or, sql } from "drizzle-orm";
 import { getDb, schema as s, type DB } from "./db";
 import { appUrl, sendMail } from "./mail";
@@ -308,12 +309,12 @@ export function buildEmp(action: EmpAction, raw: Record<string, unknown>, ctx: E
       data = { code: codeOf(cur.emp), emp: cur.emp, periodId: cur.id, effectiveFrom: eff, changes: changed };
     }
     if (action === "correct") {
-      // any period of this employee can be corrected (default: the current one); an earlier period takes only its own period fields
+      // any period of this employee can be corrected (default: the current one); an earlier period takes only its own fields (not the personal details shared by every row)
       const target = raw.periodId ? rows.find((r) => r.id === Number(raw.periodId) && codeOf(r.emp).toLowerCase() === str(code).toLowerCase()) : cur;
       if (!target) return { data: {}, before: null, errors: { code: "Period not found" }, notFound: true };
       const older = target.id !== cur.id;
       before = target as never;
-      const f = cleanEmpFields(raw, [...(older ? [] : EMP_PERSON_FIELDS), "remarks", "designation", "department", "applicable", "seatChargeStart", "revShare", "expShare"]);
+      const f = cleanEmpFields(raw, [...(older ? EMP_PERSON_FIELDS.filter((k) => !(SHARED_PERSON_FIELDS as readonly string[]).includes(k)) : EMP_PERSON_FIELDS), "remarks", "designation", "department", "applicable", "seatChargeStart", "revShare", "expShare"]);
       checkShare("revShare", f.revShare);
       checkShare("expShare", f.expShare);
       const changed = Object.fromEntries(Object.entries(f).filter(([k, v]) => String((target as never)[k] ?? "") !== String(v ?? "")));
@@ -395,9 +396,24 @@ async function splitPeriod(tx: Tx, periodId: number, to: string, changes: Record
   await tx.insert(s.employees).values({ ...copy, ...(changes as Record<string, unknown>), seq: await nextSeq(tx), changeDateFrom: addDays(to, 1), changeDateTo: null, exitDate: null } as never);
 }
 
+/** Makes every older row of an employee carry the personal details of the latest row (blank values never overwrite). */
+async function syncSharedPerson(tx: Tx) {
+  const rows = await tx.select().from(s.employees);
+  const latest = new Map<string, EmpDbRow>();
+  for (const r of rows) { const l = latest.get(r.emp); if (!l || r.changeDateFrom > l.changeDateFrom || (r.changeDateFrom === l.changeDateFrom && r.seq > l.seq)) latest.set(r.emp, r); }
+  for (const r of rows) {
+    const l = latest.get(r.emp)!;
+    if (l.id === r.id) continue;
+    const diff: Record<string, unknown> = {};
+    for (const k of SHARED_PERSON_FIELDS) { const v = (l as never)[k]; if (v !== null && v !== undefined && v !== "" && String((r as never)[k] ?? "") !== String(v)) diff[k] = v; }
+    if (Object.keys(diff).length) await tx.update(s.employees).set(diff as never).where(eq(s.employees.id, r.id));
+  }
+}
+
 /** Applies an Emp change, then recomputes the derived columns (Director, chain, seat cost...) of every row. */
 async function applyEmp(tx: Tx, action: string, d: Record<string, unknown>): Promise<string> {
   const ref = await applyEmpAction(tx, action, d);
+  await syncSharedPerson(tx);
   await resyncEmployees(tx);
   return ref;
 }
@@ -416,6 +432,9 @@ async function applyEmpAction(tx: Tx, action: string, d: Record<string, unknown>
   if (action === "correct") {
     // the chosen period row only (the current one unless another was picked); other history rows keep their values
     await tx.update(s.employees).set(d.changes as never).where(eq(s.employees.id, d.periodId as number));
+    // DOB, father's name, PAN, bank... are the same on every row of the employee: copy them to all periods
+    const shared = Object.fromEntries(Object.entries(d.changes as Record<string, unknown>).filter(([k]) => (SHARED_PERSON_FIELDS as readonly string[]).includes(k)));
+    if (Object.keys(shared).length) await tx.update(s.employees).set(shared as never).where(eq(s.employees.emp, d.emp as string));
     return String(d.emp);
   }
   if (action === "exit") {

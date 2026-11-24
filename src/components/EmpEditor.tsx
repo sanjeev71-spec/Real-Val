@@ -2,7 +2,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { empRequestAction } from "@/app/actions";
-import { CORRECT_FIELDS, PERIOD_FIELDS, PERSON_FIELDS, type EmpField } from "@/lib/empFields";
+import { CORRECT_FIELDS, PERIOD_FIELDS, PERSON_FIELDS, SHARED_PERSON_FIELDS, type EmpField } from "@/lib/empFields";
 import { COMPANY } from "../lib/company";
 
 type Val = string | number | null;
@@ -34,7 +34,7 @@ export function EmpEditor(p: {
   const fields: EmpField[] =
     p.mode === "create" ? [...PERIOD_FIELDS.filter((f) => f.key !== "status"), ...PERSON_FIELDS]
     : p.mode === "change" ? PERIOD_FIELDS
-    : p.mode === "correct" ? (p.periodOnly ? CORRECT_FIELDS.filter((f) => !PERSON_FIELDS.some((x) => x.key === f.key)) : CORRECT_FIELDS)
+    : p.mode === "correct" ? (p.periodOnly ? CORRECT_FIELDS.filter((f) => !SHARED_PERSON_FIELDS.includes(f.key as never)) : CORRECT_FIELDS)
     : [];
 
   function submit() {

@@ -45,6 +45,9 @@ export const PERSON_FIELDS: EmpField[] = [
   { key: "ifsc", label: "IFSC", type: "text" },
 ];
 
+/** Personal details that are the same on every period row of an employee (DOJ, salary and min salary stay per row). */
+export const SHARED_PERSON_FIELDS = ["gender", "dob", "email", "mobile", "fatherName", "motherName", "permanentAddress", "currentAddress", "pan", "aadhaar", "bankName", "bankAccount", "ifsc"] as const;
+
 /** What "Correct details" may change in place. */
 export const CORRECT_FIELDS: EmpField[] = [
   ...PERSON_FIELDS,
