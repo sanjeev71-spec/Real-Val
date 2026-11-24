@@ -35,6 +35,7 @@ export async function buildDirectorSummary(inp: SummaryInput): Promise<Buffer> {
     c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E79" } };
     c.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
   });
+  const tot = [0, 0, 0, 0, 0, 0, 0];
   for (const d of inp.directors) {
     const from = inp.bkgFromFor[codeOf(d.name).toLowerCase()] ?? inp.bkgFrom;
     const bf = isoToSerial(from)!;
@@ -45,6 +46,7 @@ export async function buildDirectorSummary(inp: SummaryInput): Promise<Buffer> {
     const se = computeTlSummary(inp.pnl, d.name, ef, et);
     const seat = se.total.exp["Seat Cost"] ?? 0, expTotal = se.total.expTotal, expense = expTotal - seat; // Expense shown without Seat Cost; F&F and P&L use both
     const vals = [share - expTotal, shareRA - expTotal, rev, share, shareRA, expense, seat].map(Math.round);
+    vals.forEach((v, i) => (tot[i] += v));
     const r = ws.addRow([d.name, new Date(`${from}T00:00:00Z`), ...vals]);
     r.getCell(2).numFmt = "dd-mm-yyyy";
     r.getCell(2).alignment = { horizontal: "center" };
@@ -52,11 +54,17 @@ export async function buildDirectorSummary(inp: SummaryInput): Promise<Buffer> {
     if (!d.active) r.getCell(1).font = { color: { argb: "FFC00000" }, bold: true };
     if (from !== inp.bkgFrom) r.getCell(2).font = { bold: true };
   }
+  const g = ws.addRow(["Grand Total", "", ...tot]);
+  g.eachCell({ includeEmpty: true }, (c, i) => {
+    c.font = { bold: true };
+    c.border = { top: { style: "thin" }, bottom: { style: "double" } };
+    if (i > 2) c.numFmt = NUM;
+  });
   ws.getColumn(1).width = 30; ws.getColumn(2).width = 14;
   for (let c = 3; c <= 9; c++) ws.getColumn(c).width = 18;
   ws.getRow(5).height = 32;
   ws.views = [{ state: "frozen", xSplit: 1, ySplit: 5 }];
-  ws.getCell(inp.directors.length + 8, 1).value = "Directors shown in red are inactive. No grand total: a Director’s chain can include other Directors, so rows overlap.";
+  ws.getCell(inp.directors.length + 8, 1).value = "Directors shown in red are inactive. A Director’s chain can include other Directors’ teams, so the rows (and the Grand Total) can overlap.";
   ws.getCell(inp.directors.length + 8, 1).font = { color: { argb: "FFC00000" }, italic: true };
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
