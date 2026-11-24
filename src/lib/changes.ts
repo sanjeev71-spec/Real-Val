@@ -210,13 +210,23 @@ export const EMP_PERSON_FIELDS = ["gender", "doj", "email", "mobile", "dob", "sa
 const DATE_FIELDS = new Set(["doj", "dob", "seatChargeStart"]);
 const NUM_FIELDS = new Set(["revShare", "expShare"]);
 
+/** A share typed as 0.9 or 90% (a bare number above 1 is kept so it is rejected, never guessed). Unreadable text stays as text so the check flags it. */
+function shareNum(v: unknown): number | string | null {
+  if (v === "" || v === null || v === undefined) return null;
+  const t = String(v).replace(/[,s]/g, "");
+  const pct = t.endsWith("%");
+  const n = Number(pct ? t.slice(0, -1) : t);
+  if (!Number.isFinite(n)) return String(v);
+  return pct ? n / 100 : n;
+}
+
 function cleanEmpFields(raw: Record<string, unknown>, keys: readonly string[]) {
   const out: Record<string, string | number | null> = {};
   for (const k of keys) {
     if (!(k in raw)) continue;
     const v = raw[k];
     if (DATE_FIELDS.has(k)) out[k] = txt(v) ? parseDate(v) : null;
-    else if (NUM_FIELDS.has(k)) out[k] = toNum(v);
+    else if (NUM_FIELDS.has(k)) out[k] = shareNum(v);
     else out[k] = txt(v);
   }
   return out;
@@ -257,7 +267,7 @@ export function buildEmp(action: EmpAction, raw: Record<string, unknown>, ctx: E
     return null;
   };
   const checkShare = (k: string, v: unknown) => {
-    if (v !== null && v !== undefined && (typeof v !== "number" || v < 0 || v > 1)) e[k] = "Enter a fraction between 0 and 1 (e.g. 1 = 100%)";
+    if (v !== null && v !== undefined && (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 1)) e[k] = "Enter a fraction between 0 and 1 (e.g. 1 = 100%)";
   };
 
   if (action === "create") {
