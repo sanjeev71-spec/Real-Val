@@ -68,7 +68,7 @@ export default async function ReceivablesDashboard({ searchParams }: { searchPar
         {(scope.director || scope.builder || scope.project) && " Exp rows are counted when linked to a booking of the selection."}
       </p>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 md:grid-flow-col md:auto-cols-fr">
         <Tile label="Collections from client" value={cr(r.collections)} sub={`Recd From Client ${cr(r.recdClient)} + Form Revised ${cr(r.formRevised)}`} href={`/exp?head=${encodeURIComponent("Recd From Client")}&${win}`} colour="#2563eb" />
         <Tile label="Brokerage Recd" value={cr(r.brokerage)} sub={`NOC ${cr(r.noc)} · billed ${cr(r.billed)}`} href={`/exp?head=${encodeURIComponent("Brokerage Recd")}&${win}`} colour="#16a34a" />
         <Tile label="Due receivables (PendDue)" value={cr(r.pendDue)} sub={`${fmtNum(r.dueBookings)} bookings · as of today`} href={!scope.builder ? `/bookings?sold=1&due=1${scope.director ? `&Director=${encodeURIComponent(scope.director)}` : ""}${scope.project ? `&Project=${encodeURIComponent(scope.project)}` : ""}` : undefined} colour="#ef4444" />

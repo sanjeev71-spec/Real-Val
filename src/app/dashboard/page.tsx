@@ -81,7 +81,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       </div>
       <p className="text-sm text-[var(--muted)]">Showing <b className="text-[var(--ink)]">{c.label}</b> · bookings of {fromIso.split("-").reverse().join("-")} to {toIso.split("-").reverse().join("-")}</p>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 md:grid-flow-col md:auto-cols-fr">
         <Tile label="Bookings (Live + Not Live)" value={fmtNum(p.bookings)} sub={`${p.live} Live · ${p.notLive} Not Live · ${fmtNum(Math.round(p.area))} sq ft`} href={soldWin} colour="#2563eb" />
         <Tile label="DirectorRevenue" value={cr(p.revenue)} sub={p.area ? `₹${fmtNum(Math.round(p.revenue / p.area))} per sq ft` : undefined} href={soldWin} colour="#16a34a" />
         <Tile label="ShareAmt" value={cr(pl ? pl.share : p.share)} sub={pl ? "after overrides" : "booking level, before overrides"} colour="#f59e0b" />
@@ -93,7 +93,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <section className="space-y-2">
           <h2 className="h2 !mb-0">P&amp;L {official ? "" : "(booking level)"}</h2>
           {pl ? (
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 md:grid-flow-col md:auto-cols-fr">
               <Tile label="F&F (ShareAmt - Paid Exp)" value={cr(pl.ff)} colour={pl.ff < 0 ? "#ef4444" : "#16a34a"} />
               <Tile label="P&L (RA - Paid Exp)" value={cr(pl.pl)} colour={pl.pl < 0 ? "#ef4444" : "#16a34a"} />
               <Tile label="DirectorRevenue + Incentives" value={cr(pl.revInc)} colour="#2563eb" />
@@ -102,7 +102,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               <Tile label="Seat Cost" value={cr(pl.seat)} colour="#06b6d4" />
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 md:grid-flow-col md:auto-cols-fr">
               <Tile label="ShareAmt x RA%" value={cr(p.shareRA)} sub="booking level, before overrides" colour="#f59e0b" />
               <Tile label="Comm Paid (linked to these bookings)" value={cr(commPaid)} colour="#ec4899" />
               <Tile label="ShareAmt - Comm Paid" value={cr(p.share - commPaid)} colour={p.share - commPaid < 0 ? "#ef4444" : "#16a34a"} />

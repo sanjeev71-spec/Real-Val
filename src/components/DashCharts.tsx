@@ -19,15 +19,15 @@ export const short = (v: number) => {
 export function Tile({ label, value, sub, href, colour = "#2563eb" }: { label: string; value: string; sub?: string; href?: string; colour?: string }) {
   const body = (
     <>
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">{label}</div>
-      <div className="mt-1 text-2xl font-semibold" style={{ color: colour }}>{value}</div>
-      {sub && <div className="text-xs text-[var(--muted)]">{sub}</div>}
+      <div className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-[var(--muted)]">{label}</div>
+      <div className="mt-1 text-xl font-semibold leading-tight" style={{ color: colour }}>{value}</div>
+      {sub && <div className="text-[11px] leading-snug text-[var(--muted)]">{sub}</div>}
     </>
   );
   const style = { borderLeft: `4px solid ${colour}` };
   return href
-    ? <Link href={href} style={style} className="card block transition hover:shadow-md" title="Open the records">{body}</Link>
-    : <div className="card" style={style}>{body}</div>;
+    ? <Link href={href} style={style} className="card block !p-3 transition hover:shadow-md" title="Open the records">{body}</Link>
+    : <div className="card !p-3" style={style}>{body}</div>;
 }
 
 interface Pt { label: string; v: number; href?: string; colour?: string }
