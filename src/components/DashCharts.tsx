@@ -1,0 +1,185 @@
+// Colourful SVG charts with the values written on them (server-rendered, no script). Used by both dashboards.
+import Link from "next/link";
+
+export const PALETTE = ["#2563eb", "#16a34a", "#f59e0b", "#ec4899", "#8b5cf6", "#06b6d4", "#ef4444", "#84cc16", "#f97316", "#14b8a6", "#6366f1", "#d946ef"];
+
+/** ₹ in crore / lakh, the long form for tiles. */
+export const cr = (v: number) => {
+  const a = Math.abs(v), s = v < 0 ? "-" : "";
+  return a >= 1e7 ? `${s}₹${(a / 1e7).toFixed(2)} cr` : a >= 1e5 ? `${s}₹${(a / 1e5).toFixed(1)} L` : `${s}₹${Math.round(a).toLocaleString("en-IN")}`;
+};
+/** The short form written on the charts. */
+export const short = (v: number) => {
+  const a = Math.abs(v), s = v < 0 ? "-" : "";
+  if (a < 0.5) return "0";
+  return a >= 1e7 ? `${s}${(a / 1e7).toFixed(2)}cr` : a >= 1e5 ? `${s}${(a / 1e5).toFixed(1)}L` : a >= 1e3 ? `${s}${(a / 1e3).toFixed(0)}k` : `${s}${Math.round(a)}`;
+};
+
+export function Tile({ label, value, sub, href, colour = "#2563eb" }: { label: string; value: string; sub?: string; href?: string; colour?: string }) {
+  const body = (
+    <>
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">{label}</div>
+      <div className="mt-1 text-2xl font-semibold" style={{ color: colour }}>{value}</div>
+      {sub && <div className="text-xs text-[var(--muted)]">{sub}</div>}
+    </>
+  );
+  const style = { borderLeft: `4px solid ${colour}` };
+  return href
+    ? <Link href={href} style={style} className="card block transition hover:shadow-md" title="Open the records">{body}</Link>
+    : <div className="card" style={style}>{body}</div>;
+}
+
+interface Pt { label: string; v: number; href?: string; colour?: string }
+
+/** One series of columns (negative values hang below the line). Every column carries its value. */
+export function ColumnChart({ title, data, colour = "#2563eb", fmt = short, note }: { title: string; data: Pt[]; colour?: string; fmt?: (v: number) => string; note?: string }) {
+  const W = 560, H = 150, padT = 16, n = Math.max(1, data.length);
+  const max = Math.max(0, ...data.map((d) => d.v)), min = Math.min(0, ...data.map((d) => d.v));
+  const padB = min < 0 ? 36 : 22;
+  const span = max - min || 1;
+  const y0 = padT + (max / span) * H; // zero line
+  const slot = (W - 10) / n, bw = Math.min(40, slot - 6);
+  return (
+    <div className="card">
+      <h2 className="h2">{title}</h2>
+      <svg viewBox={`0 0 ${W} ${H + padT + padB}`} className="w-full" role="img" aria-label={title}>
+        {data.map((p, i) => {
+          const h = Math.max(p.v !== 0 ? 1.5 : 0, (Math.abs(p.v) / span) * H);
+          const x = 5 + i * slot + (slot - bw) / 2;
+          const y = p.v >= 0 ? y0 - h : y0;
+          const c = p.colour ?? colour;
+          const bar = (
+            <g>
+              <rect x={x} y={y} width={bw} height={h} rx={3} fill={c} opacity={0.92}><title>{`${p.label}: ${fmt(p.v)}`}</title></rect>
+              <text x={x + bw / 2} y={p.v >= 0 ? y - 3 : y + h + 9} textAnchor="middle" fontSize="9" fontWeight="600" fill="currentColor">{fmt(p.v)}</text>
+            </g>
+          );
+          return (
+            <g key={i}>
+              {p.href ? <a href={p.href} style={{ cursor: "pointer" }}>{bar}</a> : bar}
+              <text x={x + bw / 2} y={H + padT + (min < 0 ? 28 : 14)} textAnchor="middle" fontSize="9" fill="currentColor" opacity={0.65}>{p.label}</text>
+            </g>
+          );
+        })}
+        <line x1="0" y1={y0} x2={W} y2={y0} stroke="currentColor" opacity={0.25} />
+      </svg>
+      {note && <p className="text-[11px] text-[var(--muted)]">{note}</p>}
+    </div>
+  );
+}
+
+/** Several series per label, side by side (or stacked). Values are written above each column (rotated), the legend names the colours. */
+export function GroupedChart({ title, labels, series, stacked = false, fmt = short, note }: { title: string; labels: string[]; series: { name: string; colour: string; values: number[] }[]; stacked?: boolean; fmt?: (v: number) => string; note?: string }) {
+  const W = 560, H = 140, padT = 34, padB = 22, n = Math.max(1, labels.length);
+  const tops = labels.map((_, i) => (stacked ? series.reduce((s, x) => s + Math.max(0, x.values[i] ?? 0), 0) : Math.max(0, ...series.map((x) => x.values[i] ?? 0))));
+  const bots = labels.map((_, i) => (stacked ? series.reduce((s, x) => s + Math.min(0, x.values[i] ?? 0), 0) : Math.min(0, ...series.map((x) => x.values[i] ?? 0))));
+  const max = Math.max(0, ...tops), min = Math.min(0, ...bots), span = max - min || 1;
+  const y0 = padT + (max / span) * H;
+  const slot = (W - 10) / n, gw = Math.min(46, slot - 4), bw = stacked ? gw : gw / series.length;
+  return (
+    <div className="card">
+      <div className="flex flex-wrap items-center gap-x-4">
+        <h2 className="h2 !mb-1">{title}</h2>
+        {series.map((s) => <span key={s.name} className="mb-1 flex items-center gap-1 text-[11px] text-[var(--muted)]"><i className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: s.colour }} />{s.name}</span>)}
+      </div>
+      <svg viewBox={`0 0 ${W} ${H + padT + padB}`} className="w-full" role="img" aria-label={title}>
+        {labels.map((lab, i) => {
+          const gx = 5 + i * slot + (slot - gw) / 2;
+          let up = 0, down = 0;
+          return (
+            <g key={i}>
+              {series.map((s, k) => {
+                const v = s.values[i] ?? 0;
+                const h = Math.max(v !== 0 ? 1.5 : 0, (Math.abs(v) / span) * H);
+                let x = gx + (stacked ? 0 : k * bw), y: number;
+                if (stacked) { y = v >= 0 ? y0 - ((up += Math.max(0, v)) / span) * H : y0 + (-(down += v) / span) * H - h; }
+                else y = v >= 0 ? y0 - h : y0;
+                return (
+                  <g key={s.name}>
+                    <rect x={x} y={y} width={bw - (stacked ? 0 : 1)} height={h} rx={2} fill={s.colour} opacity={0.92}><title>{`${lab} - ${s.name}: ${fmt(v)}`}</title></rect>
+                    {!stacked && v !== 0 && <text transform={`translate(${x + bw / 2 + 3},${v >= 0 ? y - 3 : y + h + 3}) rotate(-90)`} fontSize="7.5" fontWeight="600" textAnchor={v >= 0 ? "start" : "end"} fill="currentColor">{fmt(v)}</text>}
+                  </g>
+                );
+              })}
+              {stacked && <text x={gx + bw / 2} y={y0 - (tops[i] / span) * H - 3} textAnchor="middle" fontSize="8.5" fontWeight="600" fill="currentColor">{fmt(tops[i])}</text>}
+              <text x={gx + gw / 2} y={H + padT + 14} textAnchor="middle" fontSize="9" fill="currentColor" opacity={0.65}>{lab}</text>
+            </g>
+          );
+        })}
+        <line x1="0" y1={y0} x2={W} y2={y0} stroke="currentColor" opacity={0.25} />
+      </svg>
+      {note && <p className="text-[11px] text-[var(--muted)]">{note}</p>}
+    </div>
+  );
+}
+
+/** Ranked horizontal bars, every row in its own colour with the value at the end. */
+export function HBarChart({ title, rows, fmt = cr, note, hrefOf }: { title: string; rows: { name: string; v: number; sub?: string }[]; fmt?: (v: number) => string; note?: string; hrefOf?: (name: string) => string | undefined }) {
+  const W = 560, rowH = 24, labW = 150, valW = 78, n = rows.length;
+  const max = Math.max(1, ...rows.map((r) => Math.abs(r.v)));
+  return (
+    <div className="card">
+      <h2 className="h2">{title}</h2>
+      {!n && <p className="text-sm text-[var(--muted)]">No data.</p>}
+      {n > 0 && (
+        <svg viewBox={`0 0 ${W} ${n * rowH + 4}`} className="w-full" role="img" aria-label={title}>
+          {rows.map((r, i) => {
+            const w = Math.max(r.v !== 0 ? 2 : 0, (Math.abs(r.v) / max) * (W - labW - valW - 10));
+            const y = 2 + i * rowH, href = hrefOf?.(r.name);
+            const label = r.name.length > 24 ? `${r.name.slice(0, 23)}…` : r.name;
+            const inner = (
+              <g>
+                <text x={labW - 6} y={y + 15} textAnchor="end" fontSize="10.5" fill="currentColor">{label}</text>
+                <rect x={labW} y={y + 3} width={w} height={rowH - 8} rx={3} fill={r.v < 0 ? "#ef4444" : PALETTE[i % PALETTE.length]} opacity={0.92}><title>{`${r.name}: ${fmt(r.v)}${r.sub ? ` (${r.sub})` : ""}`}</title></rect>
+                <text x={labW + w + 5} y={y + 15} fontSize="10" fontWeight="600" fill="currentColor">{fmt(r.v)}</text>
+              </g>
+            );
+            return <g key={r.name}>{href ? <a href={href} style={{ cursor: "pointer" }}>{inner}</a> : inner}</g>;
+          })}
+        </svg>
+      )}
+      {note && <p className="text-[11px] text-[var(--muted)]">{note}</p>}
+    </div>
+  );
+}
+
+/** Share of a total as a ring with the legend (label, value and %). */
+export function Donut({ title, slices, fmt = (v: number) => String(Math.round(v)), centre, note }: { title: string; slices: { label: string; v: number; colour?: string }[]; fmt?: (v: number) => string; centre?: string; note?: string }) {
+  const total = slices.reduce((s, x) => s + Math.max(0, x.v), 0);
+  const R = 52, r = 32, C = 60;
+  let a0 = -Math.PI / 2;
+  const arcs = slices.map((s, i) => {
+    const frac = total ? Math.max(0, s.v) / total : 0;
+    const a1 = a0 + frac * Math.PI * 2;
+    const large = a1 - a0 > Math.PI ? 1 : 0;
+    const pt = (rad: number, a: number) => `${C + rad * Math.cos(a)},${C + rad * Math.sin(a)}`;
+    const full = frac > 0.9999;
+    const d = full
+      ? `M${C - R},${C} a${R},${R} 0 1,0 ${2 * R},0 a${R},${R} 0 1,0 ${-2 * R},0 M${C - r},${C} a${r},${r} 0 1,1 ${2 * r},0 a${r},${r} 0 1,1 ${-2 * r},0`
+      : `M${pt(R, a0)} A${R},${R} 0 ${large} 1 ${pt(R, a1)} L${pt(r, a1)} A${r},${r} 0 ${large} 0 ${pt(r, a0)} Z`;
+    a0 = a1;
+    return frac > 0 ? { d, colour: s.colour ?? PALETTE[i % PALETTE.length], label: s.label, v: s.v, frac } : null;
+  });
+  return (
+    <div className="card">
+      <h2 className="h2">{title}</h2>
+      <div className="flex flex-wrap items-center gap-4">
+        <svg viewBox="0 0 120 120" className="h-32 w-32 shrink-0" role="img" aria-label={title}>
+          {arcs.map((a, i) => a && <path key={i} d={a.d} fill={a.colour} fillRule="evenodd"><title>{`${a.label}: ${fmt(a.v)} (${(a.frac * 100).toFixed(0)}%)`}</title></path>)}
+          <text x={C} y={C + 4} textAnchor="middle" fontSize="12" fontWeight="700" fill="currentColor">{centre ?? fmt(total)}</text>
+        </svg>
+        <ul className="space-y-1 text-sm">
+          {slices.map((s, i) => (
+            <li key={s.label} className="flex items-center gap-2">
+              <i className="inline-block h-3 w-3 rounded-sm" style={{ background: s.colour ?? PALETTE[i % PALETTE.length] }} />
+              <span>{s.label}</span>
+              <b>{fmt(s.v)}</b>
+              <span className="text-[var(--muted)]">{total ? `${((Math.max(0, s.v) / total) * 100).toFixed(0)}%` : ""}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      {note && <p className="mt-1 text-[11px] text-[var(--muted)]">{note}</p>}
+    </div>
+  );
+}

@@ -19,7 +19,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const masterOrAdmin = role === "master" || role === "admin";
   const item = (href: string, label: string, show: boolean): NavItem[] => (show ? [{ href, label }] : []);
 
-  const direct: NavItem[] = user ? [...item("/", "Home", true), ...item("/dashboard", "Dashboard", masterOrAdmin)] : [];
+  const direct: NavItem[] = user ? [...item("/", "Home", true), ...item("/dashboard", "Dashboard", masterOrAdmin), ...item("/dashboard/receivables", "Receivables", masterOrAdmin)] : [];
   const groups: NavGroup[] = user
     ? [
         { label: "Sales", items: [...item("/scd/new", `New ${COMPANY.form}`, role !== "hr"), ...item("/submissions", `${COMPANY.form} Approval`, role !== "hr"), ...item("/bookings", "Bkg", role !== "hr"), ...item("/bulk", "Upload Bkg", masterOrAdmin), ...item("/reports/demand", "Demand", role !== "hr")] },
