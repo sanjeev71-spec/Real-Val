@@ -48,5 +48,5 @@ export const PERSON_FIELDS: EmpField[] = [
 /** What "Correct details" may change in place. */
 export const CORRECT_FIELDS: EmpField[] = [
   ...PERSON_FIELDS,
-  ...PERIOD_FIELDS.filter((f) => ["designation", "department", "applicable", "seatChargeStart", "remarks"].includes(f.key)),
+  ...PERIOD_FIELDS.filter((f) => ["designation", "department", "revShare", "expShare", "applicable", "seatChargeStart", "remarks"].includes(f.key)),
 ];
