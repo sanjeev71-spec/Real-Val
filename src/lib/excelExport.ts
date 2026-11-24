@@ -101,8 +101,8 @@ export async function expWorkbook(rowsNewestFirst: Row[], remarks: Map<number, s
 /** Emp table in the same column layout as the Excel Emp sheet (contains personal data: Master and HR only). */
 export async function empWorkbook(rows: Awaited<ReturnType<typeof employeesWithCalc>>, into?: ExcelJS.Workbook): Promise<ArrayBuffer> {
   const cols: [string, (r: (typeof rows)[number]) => unknown][] = [
-    // combined file only: typed columns that make a row an Emp upload action (blank Action = reference row, ignored on upload)
-    ...(into ? ([["Action", () => null], ["Emp Code", (r) => r.emp.split("~")[1] ?? ""], ["Name", () => null], ["Effective From", () => null], ["Exit Date", () => null], ["Reportees Move To", () => null]] as [string, (r: (typeof rows)[number]) => unknown][]) : []),
+    // typed columns that make a row an Emp upload action (blank Action = reference row, ignored on upload)
+    ...([["Action", () => null], ["Emp Code", (r) => r.emp.split("~")[1] ?? ""], ["Name", () => null], ["Effective From", () => null], ["Exit Date", () => null], ["Reportees Move To", () => null]] as [string, (r: (typeof rows)[number]) => unknown][]),
     ["Applicable", (r) => r.applicable], ["ManMonths", (r) => r.calc.manMonths], ["SeatCost", (r) => r.calc.seatCost],
     ["Emp", (r) => r.emp], ["ReportingHead", (r) => r.reportingHead], ["Director", (r) => r.calc.director],
     ["Status", (r) => r.status], ["Gender", (r) => r.gender], ["Branch", (r) => r.branch], ["Type", (r) => r.type],
@@ -136,9 +136,10 @@ export async function empWorkbook(rows: Awaited<ReturnType<typeof employeesWithC
   const help = wb.addWorksheet("Legend");
   [
     ["HOW TO READ THIS FILE"],
-    ["Light green headings = entered by hand (on the Emp forms or the Emp upload)."],
+    ["Light green headings = typed by hand and read on upload (Action, Emp Code, Name, Effective From, Exit Date, Reportees Move To and the Emp details)."],
     ["Light grey headings = derived by the system: Director, history dates (ChangeDateFrom / ChangeDateTo / DOExit-Change), days worked, man-months, seat cost, key."],
-    ["One row per history period of each employee. To add employees or history rows, use the Emp upload template (Emp > Upload Emp) - this download is not uploaded as it is."],
+    ["One row per history period of each employee. To upload changes, type an Action on the employee's LATEST row (New, Change, Correct or Exit) and edit only the cells that change, then upload the file on Emp > Upload Emp. Rows with a blank Action are reference only."],
+    ["Change = new history row from Effective From (ReportingHead, Branch, Type, RevShare, ExpShare, Status ... change this way). Correct = fix details on the current row (Applicable, Designation, personal details ...). Exit = leaves on Exit Date. New = add a row at the bottom with Emp Code, Name, ReportingHead and DOJ. [clear] empties a cell."],
   ].forEach((r) => help.addRow(r));
   help.getRow(2).getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: FILL_COLOUR } };
   help.getRow(3).getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CALC_COLOUR } };

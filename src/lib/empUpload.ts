@@ -205,6 +205,26 @@ export async function adaptCombinedEmp(rows: Record<string, unknown>[]): Promise
   return { rows: out, rowNos, warnings };
 }
 
+/**
+ * Rows of an Emp upload file, whatever its layout:
+ *  - the upload template (no Emp / ChangeDateFrom columns): every row is read as it is;
+ *  - an Emp download with an Action column: only rows with an Action are read, cells still holding the stored value are dropped;
+ *  - a plain Emp download (no Action column): each employee's latest row is read as a Correct, only cells that differ from the stored value count,
+ *    and rows with nothing different are skipped.
+ */
+export async function prepareEmpUpload(rows: Record<string, unknown>[]): Promise<{ rows: Record<string, unknown>[]; rowNos?: number[]; warnings: string[] }> {
+  const keys = new Set(rows.flatMap((r) => Object.keys(r)));
+  const download = ["Emp", "ChangeDateFrom", "Key", "Director"].some((k) => keys.has(k));
+  if (!download) return { rows, warnings: [] };
+  if (keys.has("Action")) return adaptCombinedEmp(rows);
+  const a = await adaptCombinedEmp(rows.map((r) => ({ ...r, Action: "Correct" })));
+  const kept = a.rows.map((r, i) => ({ r, n: a.rowNos[i] })).filter((x) => Object.keys(x.r).some((k) => k !== "Action" && k !== "Emp Code"));
+  const history = a.warnings.filter((w) => /history row/.test(w)).length;
+  const warnings = a.warnings.filter((w) => !/history row/.test(w));
+  warnings.unshift(`No Action column: the file is read as corrections of each employee's latest row, only cells that differ from the stored value count (${kept.length} employee row(s) with a difference${history ? `; ${history} older history row(s) skipped` : ""}). RevShare, ExpShare, ReportingHead, Branch, Type, Company and Status cannot be corrected this way: use Action Change with an Effective From date.`);
+  return { rows: kept.map((x) => x.r), rowNos: kept.map((x) => x.n), warnings };
+}
+
 const fill = (argb: string): ExcelJS.Fill => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
 
 /** Upload template: green headings (typed by hand), examples, instructions and a grey reference list of current employees. */
