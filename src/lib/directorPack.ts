@@ -1,7 +1,8 @@
 // Individual P&L pack for one Director: 4 sheets (P&L summary TL-wise, Bkg Data, Exp Data, Employee Data) as an .xlsx.
 import ExcelJS from "exceljs";
 import { computeTlSummary, type PnlData } from "./calc/pnl";
-import { colName } from "./fields";
+import { BKG_INPUT_KEYS, NUMBER_KEYS, colName } from "./fields";
+import { CALC_COLOUR, FILL_COLOUR } from "./expLayout";
 import { codeOf, isoToSerial, num } from "./calc/excel";
 import type { BookingRow } from "./calc/booking";
 import type { employeesWithCalc } from "./data";
@@ -112,40 +113,81 @@ export async function buildDirectorPack(inp: PackInput): Promise<Buffer> {
   for (let c = 2; c <= codes.length + 2; c++) ws1.getColumn(c).width = 16;
   ws1.views = [{ state: "frozen", xSplit: 1, ySplit: 6 }];
 
-  // ---- 2. Bkg data
+  // ---- 2. Bkg data: heading in row 1 so the sheet can be uploaded as it is (Upload Bkg / the Bkg + Exp + Emp file).
+  // Green headings = typed columns the upload reads; grey = calculated, ignored on upload (same colours as the Bkg download).
+  // Comm Paid per booking = Expenses - Income of the Exp rows with Head "Comm Paid" (the sum of their SignedGross, sign flipped to show paid as positive).
+  const commPaid = new Map<string, number>();
+  for (const e of inp.exps) {
+    if (String(e.Head ?? "").trim().toLowerCase() !== "comm paid") continue;
+    const id = String(e.BkgID ?? "").trim().toUpperCase();
+    if (!id) continue;
+    const g = num(e.Gross as number), rp = String(e["R/P"] ?? "");
+    commPaid.set(id, (commPaid.get(id) ?? 0) + (rp === "Payment" ? g : rp === "Receipt" ? -g : 0));
+  }
   const ws2 = wb.addWorksheet("Bkg Data");
-  title(ws2, [`Bkg Data - ${inp.director}`, periods[0],
-    "DirectorRevenue + Incentives = DirectorRevenue + DirectorSplRevenue + SpinToWin + " + colName("IncentiveRV") + ". Director Share (ShareAmt) = DirectorRevenue x Director Sharing + DirectorSplRevenue + SpinToWin + " + colName("IncentiveRV") + ". Director Share RA = Director Share x RA%. Total Share adds the Override share.",
-    "Basis: Chain = the Director is in the revenue-share chain; Override = the Director gets an override share only (revenue columns left blank)."]);
-  const bh = ["BkgMonth", "BkgID", "Emp", "Client", "Project", "Form Status", "Area", "NetBSPPSF", "TotalChargesPSF", "TotalCostAmt", "RC/RA", "Recd%", "DSlab", "DirectorRevenue", "DirectorSplRevenue", "SpinToWin", "IncentivePOC", colName("IncentiveRV"), "IncentiveBuilder",
-    "DirectorRevenue + Incentives", "Director Revenue RA", "Director Sharing", "Director Share", "Director Share RA", "Override_Share", "Override_Share RA", "Total Share (incl. Override)", "Total Share RA (incl. Override)", "Basis"];
-  header(ws2, 6, bh);
-  const SUMCOLS = new Set([9, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 26, 27]); // 0-based columns that get a total
-  const totals = new Array(bh.length).fill(0);
+  const typedKeys = new Set(BKG_INPUT_KEYS);
+  // [key, header]: a real Bkg key is read by the upload when typed (green); the rest are pack calculations (grey)
+  const K = (k: string): [string, string] => [k, colName(k)];
+  const cols: [string, string][] = [
+    K("BkgMonth"), K("BkgID"), K("Emp"), K("Client"), K("Project"), K("FormStatus"), K("PaymentPlan"), K("Area"),
+    K("BSPPSF"), K("InaugralDiscountPSF"), K("NPVDiscountPSF"), K("SchemeDiscountPSF"), K("FormRevisedPSF"), K("AgreementRevisedPSF"), K("PaymentPlanDiscountPSF"), K("OnFormDiscountPSF"),
+    K("NetBSPPSF"), K("PLCPSF"), K("IFMSPSF"), K("PowerBackupPSF"), K("SinkingFundClubPSF"), K("OtherChargesPSF"), K("TotalChargesPSF"), K("TotalCostPSF"), K("TotalCostAmt"), K("GST"), K("TCWithGST"),
+    K("RC/RA"), K("SPD"), K("ChqAmt"), K("Recd%"), K("DSlab"), K("DirectorRevenue"), K("DirectorSplRevenue"), K("SpinToWin"), K("IncentivePOC"), K("IncentiveRV"), K("IncentiveBuilder"),
+    ["p:rev", "DirectorRevenue + Incentives"], ["p:revRA", "Director Revenue RA"], ["p:sharing", "Director Sharing"], ["p:share", "Director Share"], ["p:shareRA", "Director Share RA"],
+    ["p:ov", "Override_Share"], ["p:ovRA", "Override_Share RA"], ["p:tot", "Total Share (incl. Override)"], ["p:totRA", "Total Share RA (incl. Override)"],
+    ["p:comm", "Comm Paid"], ["p:basis", "Basis"],
+  ];
+  const keys = cols.map((c) => c[0]);
+  const hdr2 = ws2.getRow(1);
+  cols.forEach(([k, h], i) => {
+    const cell = hdr2.getCell(i + 1);
+    cell.value = h;
+    cell.font = { bold: true };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: typedKeys.has(k) ? FILL_COLOUR : CALC_COLOUR } };
+  });
+  const TEXT = new Set(["BkgID", "Emp", "Client", "Project", "FormStatus", "PaymentPlan", "RC/RA", "p:basis"]);
+  const SUMKEYS = new Set(["TotalCostAmt", "GST", "TCWithGST", "SPD", "ChqAmt", "DSlab", "DirectorRevenue", "DirectorSplRevenue", "SpinToWin", "IncentivePOC", "IncentiveRV", "IncentiveBuilder",
+    "p:rev", "p:revRA", "p:share", "p:shareRA", "p:ov", "p:ovRA", "p:tot", "p:totRA", "p:comm"]);
+  const CHAINONLY = new Set(["TotalCostAmt", "GST", "TCWithGST", "DirectorRevenue", "DirectorSplRevenue", "SpinToWin", "IncentivePOC", "IncentiveRV", "IncentiveBuilder"]);
+  const totals: Record<string, number> = {};
   for (const d of det) {
     const b = d.b;
     const c = d.chain;
-    const vals: (string | number | Date | null)[] = [
-      asDate(b.BkgMonth), String(b.BkgID ?? ""), String(b.Emp ?? ""), String(b.Client ?? ""), String(b.Project ?? ""), String(b.FormStatus ?? ""), num(b.Area), num(b.NetBSPPSF), num(b.TotalChargesPSF), c ? num(b.TotalCostAmt) : null,
-      String(b["RC/RA"] ?? ""), num(b["Recd%"]), num(b.DSlab),
-      c ? num(b.DirectorRevenue) : null, c ? num(b.DirectorSplRevenue) : null, c ? num(b.SpinToWin) : null, c ? num(b.IncentivePOC) : null, c ? num(b.IncentiveRV) : null, c ? num(b.IncentiveBuilder) : null,
-      c ? d.rev : null, c ? d.revRA : null, c ? d.sharing : null, c ? d.share : null, c ? d.shareRA : null,
-      d.ovShare, d.ovRA, d.share + d.ovShare, d.shareRA + d.ovRA, c && d.override ? "Chain + Override" : c ? "Chain" : "Override",
-    ];
-    if (d.sold) vals.forEach((v, i) => { if (SUMCOLS.has(i) && typeof v === "number") totals[i] += v; });
+    const p: Record<string, string | number | null> = {
+      "p:rev": c ? d.rev : null, "p:revRA": c ? d.revRA : null, "p:sharing": c ? d.sharing : null, "p:share": c ? d.share : null, "p:shareRA": c ? d.shareRA : null,
+      "p:ov": d.ovShare, "p:ovRA": d.ovRA, "p:tot": d.share + d.ovShare, "p:totRA": d.shareRA + d.ovRA,
+      "p:comm": commPaid.get(String(b.BkgID ?? "").trim().toUpperCase()) ?? 0,
+      "p:basis": c && d.override ? "Chain + Override" : c ? "Chain" : "Override",
+    };
+    const vals = keys.map((k): string | number | Date | null => {
+      if (k.startsWith("p:")) return p[k];
+      if (k === "BkgMonth") return asDate(b.BkgMonth) as Date | string;
+      if (CHAINONLY.has(k) && !c) return null;
+      if (TEXT.has(k)) return String(b[k] ?? "");
+      const v = b[k];
+      if (v === null || v === undefined || v === "") return null;
+      // some typed number columns hold text on old bookings (e.g. DSlab): keep it as it is so an upload shows no change
+      if (typeof v === "number") return v;
+      if (k === "Recd%" || NUMBER_KEYS.has(k)) { const n = Number(String(v).replace(/[,\s₹]/g, "")); return Number.isFinite(n) ? n : String(v); }
+      return String(v);
+    });
+    if (d.sold) keys.forEach((k, i) => { const v = vals[i]; if (SUMKEYS.has(k) && typeof v === "number") totals[k] = (totals[k] ?? 0) + v; });
     const r = ws2.addRow(vals);
-    r.getCell(1).numFmt = "mmm-yyyy";
-    [7, 8, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 25, 26, 27, 28].forEach((n) => (r.getCell(n).numFmt = NUM));
-    r.getCell(12).numFmt = "0.0%"; r.getCell(22).numFmt = "0.0%";
+    keys.forEach((k, i) => {
+      const cell = r.getCell(i + 1);
+      if (k === "BkgMonth") cell.numFmt = "mmm-yyyy";
+      else if (k === "Recd%" || k === "p:sharing") cell.numFmt = "0.0%";
+      else if (k === "Area") cell.numFmt = "#,##0.00";
+      else if (!TEXT.has(k)) cell.numFmt = NUM;
+    });
   }
-  const tr = ws2.addRow(bh.map((_, i) => (i === 0 ? "Total (Live + Not Live only)" : SUMCOLS.has(i) ? Math.round(totals[i]) : "")));
+  const tr = ws2.addRow(keys.map((k, i) => (i === 0 ? "Total (Live + Not Live only)" : SUMKEYS.has(k) ? Math.round(totals[k] ?? 0) : "")));
   tr.font = { bold: true };
   tr.eachCell((c, i) => { c.border = { top: { style: "thin" } }; if (i > 1) c.numFmt = NUM; });
-  ws2.getColumn(1).width = 11; ws2.getColumn(2).width = 11; ws2.getColumn(3).width = 26; ws2.getColumn(4).width = 28; ws2.getColumn(5).width = 28;
-  for (let c = 6; c <= bh.length; c++) ws2.getColumn(c).width = 14;
-  ws2.getColumn(bh.length).width = 18;
-  ws2.views = [{ state: "frozen", xSplit: 4, ySplit: 6 }];
-  ws2.autoFilter = { from: { row: 6, column: 1 }, to: { row: 6, column: bh.length } };
+  keys.forEach((k, i) => (ws2.getColumn(i + 1).width = k === "BkgMonth" || k === "BkgID" ? 12 : k === "Emp" ? 26 : k === "Client" || k === "Project" ? 28 : k === "p:basis" ? 18 : 14));
+  ws2.views = [{ state: "frozen", xSplit: 4, ySplit: 1 }];
+  ws2.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: keys.length } };
 
   // ---- 3. Exp data (ExpType Expense only, this Director, ValueDate in the exp period)
   const ws3 = wb.addWorksheet("Exp Data");
@@ -189,6 +231,19 @@ export async function buildDirectorPack(inp: PackInput): Promise<Buffer> {
   mh.forEach((_, i) => (ws4.getColumn(i + 1).width = i < 3 ? 26 : 13));
   ws4.views = [{ state: "frozen", xSplit: 1, ySplit: 4 }];
   ws4.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: mh.length } };
+
+  const lg = wb.addWorksheet("Legend");
+  [
+    `Bkg Data - ${inp.director}`, periods[0],
+    "Light green headings = typed columns, read by the Bkg upload (Upload Bkg, or the Bkg sheet of the Bkg + Exp + Emp file). Light grey headings = calculated, ignored on upload.",
+    "Blank cells keep the stored value; [clear] empties a field. Only bookings of this Director's chain or override are in the sheet, and the Total row is skipped on upload.",
+    "DirectorRevenue + Incentives = DirectorRevenue + DirectorSplRevenue + SpinToWin + " + colName("IncentiveRV") + ". Director Share (ShareAmt) = DirectorRevenue x Director Sharing + DirectorSplRevenue + SpinToWin + " + colName("IncentiveRV") + ". Director Share RA = Director Share x RA%. Total Share adds the Override share.",
+    "Comm Paid = Expenses - Income of the Exp rows of the booking (same BkgID) with Head Comm Paid, all Directors and dates.",
+    "Basis: Chain = the Director is in the revenue-share chain; Override = the Director gets an override share only (revenue columns left blank).",
+    "Totals count Live and Not Live bookings only.",
+  ].forEach((t, i) => { const c = lg.getCell(i + 1, 1); c.value = t; if (i === 0) c.font = { bold: true, size: 14 }; });
+  lg.getColumn(1).width = 150;
+  lg.getCell(3, 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: FILL_COLOUR } };
 
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

@@ -10,6 +10,7 @@ function rowsOfSheet(ws: ExcelJS.Worksheet): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
   ws.eachRow((r, i) => {
     if (i === 1) return;
+    if (/^total \(/i.test(str(r.getCell(1).text))) return; // the Total row of the Director pack Bkg Data sheet
     const o: Record<string, unknown> = {};
     header.forEach((h, j) => {
       const v = r.getCell(j + 1).value;
@@ -25,7 +26,7 @@ export async function parseCombined(buf: ArrayBuffer): Promise<{ bkg: Record<str
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf);
   const pick = (names: string[]) => { const ws = wb.worksheets.find((w) => names.includes(w.name.trim().toLowerCase())); return ws ? rowsOfSheet(ws) : null; };
-  return { bkg: pick(["bkg", "bookings"]), exp: pick(["exp"]), emp: pick(["emp"]) };
+  return { bkg: pick(["bkg", "bookings", "bkg data"]), exp: pick(["exp"]), emp: pick(["emp"]) };
 }
 
 /** Reads an uploaded .xlsx (sheet "Bookings" / "Exp" / the first sheet) or .csv into rows keyed by the header row. Dates come back as yyyy-mm-dd. */
@@ -33,7 +34,7 @@ export async function parseUpload(name: string, buf: ArrayBuffer): Promise<Recor
   if (/\.xlsx$/i.test(name)) {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buf);
-    const ws = wb.worksheets.find((w) => ["bookings", "bkg", "exp"].includes(w.name.toLowerCase())) ?? wb.worksheets[0];
+    const ws = wb.worksheets.find((w) => ["bookings", "bkg", "bkg data", "exp"].includes(w.name.toLowerCase())) ?? wb.worksheets[0];
     return rowsOfSheet(ws);
   }
   const text = new TextDecoder().decode(buf).replace(/^\uFEFF/, "");
