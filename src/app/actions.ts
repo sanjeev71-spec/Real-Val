@@ -73,18 +73,18 @@ export async function superiorDecideAction(token: string, decision: "approved" |
 }
 
 // ---- bulk upload (Master only)
-async function readFile(form: FormData) {
+async function readFile(form: FormData, kind?: "bkg" | "exp") {
   const f = form.get("file");
   if (!(f instanceof File) || f.size === 0) throw new Error("Choose a CSV or XLSX file");
   if (f.size > 5_000_000) throw new Error("File is larger than 5 MB");
-  return { name: f.name, rows: await parseUpload(f.name, await f.arrayBuffer()) };
+  return { name: f.name, rows: await parseUpload(f.name, await f.arrayBuffer(), kind) };
 }
 // ---- Bkg upload: add new bookings and / or correct existing ones (Master applies at once, Admin needs Master approval)
 const bkgOpts = (form: FormData) => ({ allowAdd: form.get("allowAdd") === "1", allowUpdate: form.get("allowUpdate") === "1" });
 export async function bkgUploadCheckAction(form: FormData): Promise<{ ok: boolean; message?: string; rows?: BkgUploadRow[]; warnings?: string[]; counts?: BkgUploadCounts }> {
   await requireUser(["admin", "master"]);
   try {
-    const { rows } = await readFile(form);
+    const { rows } = await readFile(form, "bkg");
     const res = await checkBkgUpload(rows, bkgOpts(form));
     return { ok: true, rows: res.rows, warnings: res.warnings, counts: res.counts };
   } catch (e) {
@@ -94,7 +94,7 @@ export async function bkgUploadCheckAction(form: FormData): Promise<{ ok: boolea
 export async function bkgUploadCommitAction(form: FormData): Promise<{ ok: boolean; message?: string; applied?: boolean; id?: number; counts?: BkgUploadCounts }> {
   const user = await requireUser(["admin", "master"]);
   try {
-    const { name, rows } = await readFile(form);
+    const { name, rows } = await readFile(form, "bkg");
     const res = await checkBkgUpload(rows, bkgOpts(form));
     if (res.rows.some((r) => Object.keys(r.errors).length)) return { ok: false, message: "Some rows have errors - check again." };
     const r = await ch.requestBkgUpload(user, { fileName: name, creates: res.creates, updates: res.updates });
@@ -111,7 +111,7 @@ const expOpts = (form: FormData) => ({ allowAdd: form.get("allowAdd") === "1", a
 export async function bulkExpCheckAction(form: FormData): Promise<{ ok: boolean; message?: string; rows?: ExpBulkRow[]; warnings?: string[]; counts?: ExpBulkCounts }> {
   await requireUser(["admin", "master"]);
   try {
-    const { rows } = await readFile(form);
+    const { rows } = await readFile(form, "exp");
     const res = await checkExpUpload(rows, expOpts(form));
     return { ok: true, rows: res.rows, warnings: res.warnings, counts: res.counts };
   } catch (e) {
@@ -121,7 +121,7 @@ export async function bulkExpCheckAction(form: FormData): Promise<{ ok: boolean;
 export async function bulkExpCommitAction(form: FormData): Promise<{ ok: boolean; message?: string; applied?: boolean; id?: number; counts?: ExpBulkCounts }> {
   const user = await requireUser(["admin", "master"]);
   try {
-    const { name, rows } = await readFile(form);
+    const { name, rows } = await readFile(form, "exp");
     const res = await checkExpUpload(rows, expOpts(form));
     if (res.rows.some((r) => Object.keys(r.errors).length)) return { ok: false, message: "Some rows have errors - check again." };
     const r = await ch.requestExpUpload(user, { fileName: name, creates: res.creates, updates: res.updates, adds: res.adds, merges: res.merges }, res.before);

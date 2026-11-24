@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import { currentUser } from "@/lib/auth";
 import { computedBookings, employeesWithCalc, expWithCalc, loadPnlData, pnlDirectors } from "@/lib/data";
+import { storedExpFields } from "@/lib/expRemarks";
 import { buildDirectorPack } from "@/lib/directorPack";
 
 export const dynamic = "force-dynamic";
@@ -21,11 +22,11 @@ export async function GET(req: Request) {
   const chosen = u.searchParams.getAll("d").filter((d) => all.includes(d));
   if (!chosen.length) return new Response("Choose at least one Director", { status: 400 });
 
-  const [pnl, bookings, exps, emps] = await Promise.all([loadPnlData(), computedBookings(), expWithCalc(), employeesWithCalc()]);
+  const [pnl, bookings, exps, emps, storedExp] = await Promise.all([loadPnlData(), computedBookings(), expWithCalc(), employeesWithCalc(), storedExpFields()]);
   const today = new Date().toISOString().slice(0, 10);
   const files: { name: string; data: Buffer }[] = [];
   for (const director of chosen) {
-    const data = await buildDirectorPack({ director, bkgFrom, bkgTo, expFrom, expTo, pnl, bookings, exps, emps });
+    const data = await buildDirectorPack({ director, bkgFrom, bkgTo, expFrom, expTo, pnl, bookings, exps, emps, storedExp });
     files.push({ name: `PnL - ${safe(director.split("~")[0])} - ${today}.xlsx`, data });
   }
   if (files.length === 1) {

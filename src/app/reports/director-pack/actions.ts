@@ -1,6 +1,7 @@
 "use server";
 import { requireUser } from "@/lib/auth";
 import { computedBookings, currentPeriods, employeesWithCalc, expWithCalc, loadPnlData, pnlDirectors } from "@/lib/data";
+import { storedExpFields } from "@/lib/expRemarks";
 import { buildDirectorPack } from "@/lib/directorPack";
 import { sendMail } from "@/lib/mail";
 import { COMPANY } from "@/lib/company";
@@ -34,7 +35,7 @@ export async function sendPacksAction(input: { items: PackRecipient[]; bf: strin
   if (![bf, bt, ef, et].every(isoOk)) return input.items.map((i) => ({ ...i, ok: false, message: "Choose all four dates" }));
   const items = input.items.slice(0, 10);
   const valid = new Set(await pnlDirectors());
-  const [pnl, bookings, exps, emps] = await Promise.all([loadPnlData(), computedBookings(), expWithCalc(), employeesWithCalc()]);
+  const [pnl, bookings, exps, emps, storedExp] = await Promise.all([loadPnlData(), computedBookings(), expWithCalc(), employeesWithCalc(), storedExpFields()]);
   const today = new Date().toISOString().slice(0, 10);
   const out: PackSendResult[] = [];
   for (const it of items) {
@@ -42,7 +43,7 @@ export async function sendPacksAction(input: { items: PackRecipient[]; bf: strin
       if (!valid.has(it.director)) throw new Error("Unknown Director");
       const to = input.testOnly ? user.email : it.email.trim();
       if (!mailOk(to)) throw new Error("No valid email address");
-      const data = await buildDirectorPack({ director: it.director, bkgFrom: bf, bkgTo: bt, expFrom: ef, expTo: et, pnl, bookings, exps, emps });
+      const data = await buildDirectorPack({ director: it.director, bkgFrom: bf, bkgTo: bt, expFrom: ef, expTo: et, pnl, bookings, exps, emps, storedExp });
       const name = it.director.split("~")[0];
       const file = `PnL - ${name.replace(/[^A-Za-z0-9 _.-]+/g, "_").trim()} - ${today}.xlsx`;
       await sendMail({

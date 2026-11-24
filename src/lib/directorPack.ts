@@ -2,7 +2,7 @@
 import ExcelJS from "exceljs";
 import { computeTlSummary, type PnlData } from "./calc/pnl";
 import { BKG_INPUT_KEYS, NUMBER_KEYS, colName } from "./fields";
-import { CALC_COLOUR, FILL_COLOUR } from "./expLayout";
+import { CALC_COLOUR, EXP_FILL_COLS, FILL_COLOUR } from "./expLayout";
 import { codeOf, isoToSerial, num } from "./calc/excel";
 import type { BookingRow } from "./calc/booking";
 import type { employeesWithCalc } from "./data";
@@ -17,6 +17,7 @@ export interface PackInput {
   bookings: BookingRow[];
   exps: ExpRowAny[];
   emps: EmpRows;
+  storedExp?: Map<number, { emp: string | null; project: string | null }>;
 }
 
 const NUM = '#,##0;(#,##0);"-"';
@@ -189,11 +190,21 @@ export async function buildDirectorPack(inp: PackInput): Promise<Buffer> {
   ws2.views = [{ state: "frozen", xSplit: 4, ySplit: 1 }];
   ws2.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: keys.length } };
 
-  // ---- 3. Exp data (ExpType Expense only, this Director, ValueDate in the exp period)
+  // ---- 3. Exp data (ExpType Expense only, this Director, ValueDate in the exp period). Heading in row 1 so it uploads as it is
+  // (green = typed, read by the Exp upload; grey = calculated, ignored). Income / Expenses show Gross by R/P; R/P and Gross are what the upload reads.
   const ws3 = wb.addWorksheet("Exp Data");
-  title(ws3, [`Exp Data (Expense heads) - ${inp.director}`, periods[1]]);
-  const eh = ["DocNo", "PayDate", "Head", "Mode", "Narration", "Income", "Expenses", "Emp", "BkgID", "Client", "Project"];
-  header(ws3, 5, eh);
+  const eh = ["DocNo", "PayDate", "Head", "Mode", "Narration", "R/P", "Gross", "Income", "Expenses", "Emp", "BkgID", "Client", "Project"];
+  const hdrRow = (ws: ExcelJS.Worksheet, cols: string[], typed: (c: string) => boolean) => {
+    const r = ws.getRow(1);
+    cols.forEach((c, i) => {
+      const cell = r.getCell(i + 1);
+      cell.value = c;
+      cell.font = { bold: true };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: typed(c) ? FILL_COLOUR : CALC_COLOUR } };
+    });
+  };
+  hdrRow(ws3, eh, (c) => EXP_FILL_COLS.has(c));
   const erows = inp.exps
     .filter((e) => String(e.ExpType ?? "") === "Expense" && sameCode(e.Director, dc))
     .filter((e) => { const d = isoToSerial(e.ValueDate as string); return d !== null && d >= ef && d <= et; })
@@ -203,44 +214,49 @@ export async function buildDirectorPack(inp: PackInput): Promise<Buffer> {
     const g = num(e.Gross as number);
     const income = String(e["R/P"] ?? "") === "Receipt" ? g : 0, expense = String(e["R/P"] ?? "") === "Payment" ? g : 0;
     inc += income; outc += expense;
-    const r = ws3.addRow([String(e.DocNo ?? ""), asDate(e.PayDate), String(e.Head ?? ""), String(e.Mode ?? ""), String(e.Narration ?? ""), income || null, expense || null, String(e.Emp ?? ""), String(e.BkgID ?? ""), String(e.Client ?? ""), String(e.Project ?? "")]);
-    r.getCell(2).numFmt = "dd-mm-yyyy"; r.getCell(6).numFmt = NUM; r.getCell(7).numFmt = NUM;
+    const id = Number(e.id);
+    const st = inp.storedExp?.get(id); // Emp and Project as typed on the entry, so an unchanged file uploads as no change
+    const r = ws3.addRow([e.DocNo || (Number.isFinite(id) ? id : ""), asDate(e.PayDate), String(e.Head ?? ""), String(e.Mode ?? ""), String(e.Narration ?? ""), String(e["R/P"] ?? ""), g,
+      income || null, expense || null, st ? st.emp ?? "" : String(e.Emp ?? ""), String(e.BkgID ?? ""), String(e.Client ?? ""), st ? st.project ?? "" : String(e.Project ?? "")]);
+    r.getCell(2).numFmt = "dd-mm-yyyy"; [7, 8, 9].forEach((n) => (r.getCell(n).numFmt = NUM));
   }
-  const t3 = ws3.addRow(["Total", "", "", "", "", Math.round(inc), Math.round(outc)]);
-  t3.font = { bold: true }; t3.eachCell((c) => (c.border = { top: { style: "thin" } })); t3.getCell(6).numFmt = NUM; t3.getCell(7).numFmt = NUM;
-  [12, 12, 18, 12, 40, 14, 14, 24, 14, 26, 26].forEach((w, i) => (ws3.getColumn(i + 1).width = w));
-  ws3.views = [{ state: "frozen", ySplit: 5 }];
-  ws3.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: eh.length } };
+  const t3 = ws3.addRow(["Total (Expense heads)", "", "", "", "", "", "", Math.round(inc), Math.round(outc)]);
+  t3.font = { bold: true }; t3.eachCell((c) => (c.border = { top: { style: "thin" } })); t3.getCell(8).numFmt = NUM; t3.getCell(9).numFmt = NUM;
+  [14, 12, 18, 12, 40, 10, 14, 14, 14, 24, 14, 26, 26].forEach((w, i) => (ws3.getColumn(i + 1).width = w));
+  ws3.views = [{ state: "frozen", ySplit: 1 }];
+  ws3.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: eh.length } };
 
-  // ---- 4. Employee data with seat cost (every Emp period under this Director)
+  // ---- 4. Employee data with seat cost (every Emp period under this Director). Same layout as the Emp sheet of the Bkg + Exp + Emp file:
+  // a row is applied on upload only when its Action is filled (New / Change / Correct / Exit); blank Action = reference row.
   const ws4 = wb.addWorksheet("Employee Data");
-  title(ws4, [`Employee Data with Seat Cost - ${inp.director}`, "One row per history period"]);
-  const mh = ["Emp", "ReportingHead", "Director", "Status", "Gender", "Branch", "Type", "RevShare", "ExpShare", "DOJ", "ChangeDateFrom", "ChangeDateTo", "Applicable", "ManMonths", "SeatCost"];
-  header(ws4, 4, mh);
+  const mh = ["Action", "Emp Code", "Name", "Effective From", "Exit Date", "Reportees Move To", "Emp", "ReportingHead", "Director", "Status", "Gender", "Branch", "Type", "RevShare", "ExpShare", "DOJ", "ChangeDateFrom", "ChangeDateTo", "Applicable", "ManMonths", "SeatCost"];
+  const calcEmp = new Set(["Director", "ChangeDateFrom", "ChangeDateTo", "ManMonths", "SeatCost"]);
+  hdrRow(ws4, mh, (c) => !calcEmp.has(c));
   const today = new Date().toISOString().slice(0, 10);
   const mine = inp.emps.filter((r) => sameCode(r.calc.director, dc));
   let seat = 0, mm = 0;
   for (const r of mine) {
     seat += r.calc.seatCost; mm += r.calc.manMonths;
-    const row = ws4.addRow([r.emp, r.reportingHead, r.calc.director, r.status, r.gender, r.branch, r.type, r.revShare, r.expShare, asDate(r.doj ?? ""), asDate(r.changeDateFrom), asDate(r.changeDateTo ?? today), r.applicable, r.calc.manMonths, Math.round(r.calc.seatCost)]);
-    [10, 11, 12].forEach((c) => (row.getCell(c).numFmt = "dd-mm-yyyy"));
-    row.getCell(8).numFmt = "0.0%"; row.getCell(9).numFmt = "0.0%"; row.getCell(14).numFmt = "0.00"; row.getCell(15).numFmt = NUM;
+    const row = ws4.addRow([null, r.emp.split("~")[1] ?? "", null, null, null, null, r.emp, r.reportingHead, r.calc.director, r.status, r.gender, r.branch, r.type, r.revShare, r.expShare, asDate(r.doj ?? ""), asDate(r.changeDateFrom), asDate(r.changeDateTo ?? today), r.applicable, r.calc.manMonths, Math.round(r.calc.seatCost)]);
+    [4, 5, 16, 17, 18].forEach((c) => (row.getCell(c).numFmt = "dd-mm-yyyy"));
+    row.getCell(14).numFmt = "0.0%"; row.getCell(15).numFmt = "0.0%"; row.getCell(20).numFmt = "0.00"; row.getCell(21).numFmt = NUM;
   }
-  const t4 = ws4.addRow(["Total", "", "", "", "", "", "", "", "", "", "", "", "", Math.round(mm * 100) / 100, Math.round(seat)]);
-  t4.font = { bold: true }; t4.eachCell((c) => (c.border = { top: { style: "thin" } })); t4.getCell(14).numFmt = "0.00"; t4.getCell(15).numFmt = NUM;
-  mh.forEach((_, i) => (ws4.getColumn(i + 1).width = i < 3 ? 26 : 13));
-  ws4.views = [{ state: "frozen", xSplit: 1, ySplit: 4 }];
-  ws4.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: mh.length } };
+  const t4 = ws4.addRow(mh.map((_, i) => (i === 0 ? "Total (Employee Data)" : i === 19 ? Math.round(mm * 100) / 100 : i === 20 ? Math.round(seat) : "")));
+  t4.font = { bold: true }; t4.eachCell((c) => (c.border = { top: { style: "thin" } })); t4.getCell(20).numFmt = "0.00"; t4.getCell(21).numFmt = NUM;
+  mh.forEach((_, i) => (ws4.getColumn(i + 1).width = i === 6 || i === 7 || i === 8 || i === 2 || i === 5 ? 26 : 13));
+  ws4.views = [{ state: "frozen", xSplit: 1, ySplit: 1 }];
+  ws4.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: mh.length } };
 
   const lg = wb.addWorksheet("Legend");
   [
-    `Bkg Data - ${inp.director}`, periods[0],
+    `Bkg Data / Exp Data / Employee Data - ${inp.director}`, periods[0], periods[1],
     "Light green headings = typed columns, read by the Bkg upload (Upload Bkg, or the Bkg sheet of the Bkg + Exp + Emp file). Light grey headings = calculated, ignored on upload.",
     "Blank cells keep the stored value; [clear] empties a field. Only bookings of this Director's chain or override are in the sheet, and the Total row is skipped on upload.",
     "DirectorRevenue + Incentives = DirectorRevenue + DirectorSplRevenue + SpinToWin + " + colName("IncentiveRV") + ". Director Share (ShareAmt) = DirectorRevenue x Director Sharing + DirectorSplRevenue + SpinToWin + " + colName("IncentiveRV") + ". Director Share RA = Director Share x RA%. Total Share adds the Override share.",
     "Comm Paid = Expenses - Income of the Exp rows of the booking (same BkgID) with Head Comm Paid, all Directors and dates.",
     "Basis: Chain = the Director is in the revenue-share chain; Override = the Director gets an override share only (revenue columns left blank).",
-    "Totals count Live and Not Live bookings only.",
+    "Totals of Bkg Data count Live and Not Live bookings only.",
+    "Exp Data: R/P and Gross are what the Exp upload reads (Income / Expenses are calculated). Employee Data: a row is applied on upload only when its Action (New, Change, Correct or Exit) is filled; use the Emp sheet of the Bkg + Exp + Emp file page. Total rows are skipped on upload.",
   ].forEach((t, i) => { const c = lg.getCell(i + 1, 1); c.value = t; if (i === 0) c.font = { bold: true, size: 14 }; });
   lg.getColumn(1).width = 150;
   lg.getCell(3, 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: FILL_COLOUR } };
