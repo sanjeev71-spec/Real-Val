@@ -308,12 +308,17 @@ export function buildEmp(action: EmpAction, raw: Record<string, unknown>, ctx: E
       data = { code: codeOf(cur.emp), emp: cur.emp, periodId: cur.id, effectiveFrom: eff, changes: changed };
     }
     if (action === "correct") {
-      const f = cleanEmpFields(raw, [...EMP_PERSON_FIELDS, "remarks", "designation", "department", "applicable", "seatChargeStart", "revShare", "expShare"]);
+      // any period of this employee can be corrected (default: the current one); an earlier period takes only its own period fields
+      const target = raw.periodId ? rows.find((r) => r.id === Number(raw.periodId) && codeOf(r.emp).toLowerCase() === str(code).toLowerCase()) : cur;
+      if (!target) return { data: {}, before: null, errors: { code: "Period not found" }, notFound: true };
+      const older = target.id !== cur.id;
+      before = target as never;
+      const f = cleanEmpFields(raw, [...(older ? [] : EMP_PERSON_FIELDS), "remarks", "designation", "department", "applicable", "seatChargeStart", "revShare", "expShare"]);
       checkShare("revShare", f.revShare);
       checkShare("expShare", f.expShare);
-      const changed = Object.fromEntries(Object.entries(f).filter(([k, v]) => String((cur as never)[k] ?? "") !== String(v ?? "")));
+      const changed = Object.fromEntries(Object.entries(f).filter(([k, v]) => String((target as never)[k] ?? "") !== String(v ?? "")));
       if (!Object.keys(changed).length) e.form = "Nothing was changed";
-      data = { code: codeOf(cur.emp), emp: cur.emp, periodId: cur.id, changes: changed };
+      data = { code: codeOf(cur.emp), emp: cur.emp, periodId: target.id, changes: changed };
     }
     if (action === "exit") {
       const exitDate = parseDate(raw.exitDate ?? "");
@@ -409,7 +414,7 @@ async function applyEmpAction(tx: Tx, action: string, d: Record<string, unknown>
     return String(d.emp);
   }
   if (action === "correct") {
-    // the current row only (RevShare / ExpShare included); earlier history rows keep their values
+    // the chosen period row only (the current one unless another was picked); other history rows keep their values
     await tx.update(s.employees).set(d.changes as never).where(eq(s.employees.id, d.periodId as number));
     return String(d.emp);
   }

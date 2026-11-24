@@ -14,6 +14,7 @@ export function EmpEditor(p: {
   employees: string[];
   current?: Record<string, Val>; // the current period (for change / correct / exit)
   reportees?: string[]; // people reporting to this employee now (for exit)
+  periodOnly?: boolean; // correcting an earlier period: its own fields only
 }) {
   const router = useRouter();
   const today = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
@@ -33,13 +34,14 @@ export function EmpEditor(p: {
   const fields: EmpField[] =
     p.mode === "create" ? [...PERIOD_FIELDS.filter((f) => f.key !== "status"), ...PERSON_FIELDS]
     : p.mode === "change" ? PERIOD_FIELDS
-    : p.mode === "correct" ? CORRECT_FIELDS
+    : p.mode === "correct" ? (p.periodOnly ? CORRECT_FIELDS.filter((f) => !PERSON_FIELDS.some((x) => x.key === f.key)) : CORRECT_FIELDS)
     : [];
 
   function submit() {
     setMsg(null);
     const payload: Record<string, unknown> = { ...d };
     if (p.mode !== "create") payload.code = String(p.current?.emp ?? "").split("~")[1];
+    if (p.mode === "correct") payload.periodId = p.current?.id;
     if (p.mode === "exit") payload.reassign = Object.entries(reassign).map(([emp, newHead]) => ({ emp, newHead }));
     start(async () => {
       const r = await empRequestAction(p.mode, payload);

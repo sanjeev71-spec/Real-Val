@@ -15,10 +15,10 @@ const TABS = [
   ["exit", "Exit"],
 ] as const;
 
-export default async function EmpPage({ params, searchParams }: { params: Promise<{ code: string }>; searchParams: Promise<{ tab?: string }> }) {
+export default async function EmpPage({ params, searchParams }: { params: Promise<{ code: string }>; searchParams: Promise<{ tab?: string; period?: string }> }) {
   const user = await requireUser(["hr", "master"]);
   const code = decodeURIComponent((await params).code);
-  const { tab = "" } = await searchParams;
+  const { tab = "", period = "" } = await searchParams;
   const all = await employeesWithCalc();
   const periods = all.filter((r) => (r.emp.split("~")[1] ?? "").toLowerCase() === code.toLowerCase()).sort((a, b) => b.changeDateFrom.localeCompare(a.changeDateFrom));
   if (!periods.length) notFound();
@@ -26,7 +26,9 @@ export default async function EmpPage({ params, searchParams }: { params: Promis
   const exited = cur.changeDateTo !== null;
   const names = [...new Set(all.map((r) => r.emp))].sort();
   const reportees = currentPeriods(all).filter((r) => r.changeDateTo === null && r.reportingHead === cur.emp && r.emp !== cur.emp).map((r) => r.emp);
+  const sel = periods.find((p) => String(p.id) === period) ?? cur;
   const { calc: _c, ...current } = cur;
+  const { calc: _s, ...selected } = sel;
 
   return (
     <div className="space-y-4">
@@ -74,7 +76,22 @@ export default async function EmpPage({ params, searchParams }: { params: Promis
         </>
       )}
       {tab === "change" && !exited && <EmpEditor mode="change" role={user.role} employees={names} current={current as never} />}
-      {tab === "correct" && <EmpEditor mode="correct" role={user.role} employees={names} current={current as never} />}
+      {tab === "correct" && (
+        <>
+          <section className="card">
+            <h2 className="h2">Which period to correct</h2>
+            <div className="flex flex-wrap gap-2">
+              {periods.map((p) => (
+                <Link key={p.id} className={`btn ${p.id === sel.id ? "btn-primary" : ""}`} href={`/emp/${encodeURIComponent(code)}?tab=correct&period=${p.id}`}>
+                  {fmtDate(p.changeDateFrom)} – {p.changeDateTo ? fmtDate(p.changeDateTo) : "current"}
+                </Link>
+              ))}
+            </div>
+            {sel.id !== cur.id && <p className="mt-2 text-sm text-[var(--muted)]">An earlier period: only its own fields (designation, department, shares, seat cost, remarks) can be corrected here. Personal details are corrected on the current period.</p>}
+          </section>
+          <EmpEditor key={sel.id} mode="correct" role={user.role} employees={names} current={selected as never} periodOnly={sel.id !== cur.id} />
+        </>
+      )}
       {tab === "exit" && !exited && <EmpEditor mode="exit" role={user.role} employees={names} current={current as never} reportees={reportees} />}
     </div>
   );
