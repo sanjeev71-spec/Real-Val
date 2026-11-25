@@ -1,5 +1,6 @@
 import { requireUser } from "@/lib/auth";
 import { AllUpload } from "@/components/AllUpload";
+import { todayIso } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -16,10 +17,11 @@ export default async function AllFilePage() {
         </p>
         <form method="get" action="/api/export/all" className="flex flex-wrap items-end gap-3">
           <div><label className="label" htmlFor="bf">Bkg from BkgMonth (blank = all)</label><input id="bf" name="bf" type="date" className="input" /></div>
-          <div><label className="label" htmlFor="ef">Exp from PayDate (blank = all)</label><input id="ef" name="ef" type="date" className="input" /></div>
+          <div><label className="label" htmlFor="ef">Exp from PayDate (blank = all)</label><input id="ef" name="ef" type="date" className="input" defaultValue="2023-01-01" /></div>
+          <div><label className="label" htmlFor="et">Exp to PayDate (blank = all)</label><input id="et" name="et" type="date" className="input" defaultValue={todayIso()} /></div>
           <button className="btn btn-primary">Download Bkg + Exp + Emp (.xlsx)</button>
         </form>
-        <p className="text-xs text-[var(--muted)]">The full file is large (about 6 MB) and takes up to a minute to build. If the download does not complete, fill the two dates to get a smaller file. Emp holds personal data: the file is for Master only.</p>
+        <p className="text-xs text-[var(--muted)]">The full file is large (about 6 MB) and takes up to a minute to build. If the download does not complete, narrow the dates to get a smaller file. Emp holds personal data: the file is for Master only.</p>
         <p>
           <b>Upload:</b> upload the same file back. Each sheet follows the rules of its own upload page (Upload Bkg, Upload Exp, Upload Emp): a row with an existing BkgID / DocNo / Emp is a
           correction, blank cells keep the stored value, <code>[clear]</code> empties a field, and a new Bkg or Exp row has a blank BkgID or DocNo.

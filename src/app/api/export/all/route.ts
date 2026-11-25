@@ -10,14 +10,14 @@ export const maxDuration = 60;
 export async function GET(req: Request) {
   const user = await currentUser();
   if (!user || user.role !== "master") return new Response("Not allowed", { status: 403 });
-  // optional start dates keep the file small: Bkg by BkgMonth, Exp by PayDate (blank = everything)
+  // optional start dates keep the file small: Bkg by BkgMonth, Exp by PayDate from / to (blank = everything)
   const sp = new URL(req.url).searchParams;
   const from = (k: string) => (/^\d{4}-\d{2}-\d{2}$/.test(sp.get(k) ?? "") ? sp.get(k)! : "");
-  const bkgFrom = from("bf"), expFrom = from("ef");
+  const bkgFrom = from("bf"), expFrom = from("ef"), expTo = from("et");
   const [bkgRows, expAll, emps] = await Promise.all([computedBookings(), expWithCalc(), employeesWithCalc()]);
   const [remarks, stored] = await Promise.all([expExceptionRemarks(expAll), storedExpFields()]);
   const bkg = bkgFrom ? bkgRows.filter((r) => String(r.BkgMonth ?? "") >= bkgFrom) : bkgRows;
-  const exp = expFrom ? expAll.filter((r) => String(r.PayDate ?? "") >= expFrom) : expAll;
+  const exp = expAll.filter((r) => (!expFrom || String(r.PayDate ?? "") >= expFrom) && (!expTo || String(r.PayDate ?? "") <= expTo));
   const file = await combinedWorkbook({ bkg, exp, emp: emps, remarks, stored });
   // sent in pieces: a streamed response is not held to the 4.5 MB body limit of a plain function response
   const CHUNK = 64 * 1024;
