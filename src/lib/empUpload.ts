@@ -21,7 +21,7 @@ export const EMP_UPLOAD_COLUMNS: [string, string, string][] = [
   ["Emp Code", "code", "all"],
   ["Name", "name", "New"],
   ["Effective From", "effectiveFrom", "Change"],
-  ["Exit Date", "exitDate", "Exit"],
+  ["Exit Date", "exitDate", "Exit, Correct"],
   ["Reportees Move To", "moveTo", "Exit"],
   ["ReportingHead", "reportingHead", "New, Change"],
   ["Branch", "branch", "New, Change"],
@@ -56,7 +56,7 @@ export const EMP_UPLOAD_COLUMNS: [string, string, string][] = [
 const ACTIONS: Record<string, EmpAction> = { new: "create", add: "create", change: "change", history: "change", correct: "correct", exit: "exit" };
 const LABEL: Record<EmpAction, string> = { create: "New", change: "Change", correct: "Correct", exit: "Exit" };
 const PERIOD_ONLY = new Set(["reportingHead", "branch", "type", "revShare", "expShare", "company", "status"]);
-const CORRECT_OK = new Set(["revShare", "expShare", "designation", "department", "applicable", "seatChargeStart", "remarks", "doj", "gender", "email", "mobile", "dob", "salary", "minSalary", "fatherName", "motherName", "permanentAddress", "currentAddress", "pan", "aadhaar", "bankName", "bankAccount", "ifsc"]);
+const CORRECT_OK = new Set(["exitDate", "revShare", "expShare", "designation", "department", "applicable", "seatChargeStart", "remarks", "doj", "gender", "email", "mobile", "dob", "salary", "minSalary", "fatherName", "motherName", "permanentAddress", "currentAddress", "pan", "aadhaar", "bankName", "bankAccount", "ifsc"]);
 const CHANGE_OK = new Set([...PERIOD_ONLY, "designation", "department", "applicable", "seatChargeStart", "remarks"]);
 
 export interface EmpUploadRow {
@@ -256,8 +256,8 @@ export async function empTemplateXlsx(current: { emp: string; reportingHead: str
     ["Delete the 4 example rows (rows 2-5) before uploading. One row = one action on one employee; one row per employee per upload. Dates dd-mm-yyyy. Up to 300 rows."],
     ["Action = New: adds an employee. Needs Emp Code (new, unique), Name, ReportingHead (Name~Code) and DOJ. The first history row starts on the DOJ."],
     ["Action = Change: starts a NEW HISTORY ROW from 'Effective From' (the current row closes the day before). Fill only what changes: ReportingHead, Branch, Type, RevShare, ExpShare, Designation, Department, Applicable, SeatChargeStart, Company, Status, Remarks. Bookings before that date keep the old hierarchy."],
-    ["Action = Correct: fixes details on the CURRENT row without a new history row - personal details (DOJ, Mobile, PAN, Bank ...) and Designation, Department, Applicable, SeatChargeStart, Remarks. RevShare / ExpShare can be corrected here too, on the current row only (earlier history rows keep theirs). Reporting head cannot be corrected this way; use Change."],
-    ["Action = Exit: the employee leaves on 'Exit Date'. Everyone reporting to them moves one level up from the next day, or to 'Reportees Move To' (Name~Code) when filled."],
+    ["Action = Correct: fixes details on the CURRENT row without a new history row - personal details (DOJ, Mobile, PAN, Bank ...) and Designation, Department, Applicable, SeatChargeStart, Remarks. RevShare / ExpShare can be corrected here too, on the current row only (earlier history rows keep theirs). Reporting head cannot be corrected this way; use Change. For an employee who has already left, Correct with 'Exit Date' changes the exit date (the end of the last history row); it cannot be before that row's start."],
+    ["Action = Exit: the employee leaves on 'Exit Date' (not before the start of their current history row). Everyone reporting to them moves one level up from the next day, or to 'Reportees Move To' (Name~Code) when filled."],
     ["Blank cells keep the stored value. To empty a field on purpose type [clear]. RevShare / ExpShare are fractions: 1 = 100%."],
     ["Green headings = typed by hand and read on upload (every column of this template). The 'Current employees' sheet is for reference only (grey = built in) and is not read."],
     [`HR uploads go to the Master for approval as one change; the Master's uploads apply at once. Nothing is saved unless every row passes.`],

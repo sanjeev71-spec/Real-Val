@@ -320,6 +320,8 @@ export function buildEmp(action: EmpAction, raw: Record<string, unknown>, ctx: E
       checkShare("expShare", f.expShare);
       const changed: Record<string, unknown> = Object.fromEntries(Object.entries(f).filter(([k, v]) => String((target as never)[k] ?? "") !== String(v ?? "")));
       // the exit date of an employee who has left: the end of their last period
+      if (!cur.changeDateTo && txt(raw.exitDate)) e.exitDate = "This employee has not left - use Exit";
+      if (older && txt(raw.exitDate)) e.exitDate = "Only the last history row has an exit date";
       if (!older && cur.changeDateTo && raw.exitDate !== undefined) {
         const xd = parseDate(raw.exitDate ?? "");
         if (!isDate(xd)) e.exitDate = "Exit date is required (use New employee to re-join)";
