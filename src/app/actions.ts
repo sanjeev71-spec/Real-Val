@@ -292,6 +292,12 @@ export async function mergeExpAction(ids: number[]) {
   if (r.ok) revalidatePath("/", "layout");
   return r;
 }
+export async function renameExpDocAction(oldBase: string, newBase: string) {
+  const user = await requireUser(["master"]);
+  const r = await ch.requestRename(user, oldBase, newBase);
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+}
 export async function splitExpLineAction(lineId: number) {
   const user = await requireUser(["admin", "master"]);
   const r = await ch.requestSplit(user, lineId);

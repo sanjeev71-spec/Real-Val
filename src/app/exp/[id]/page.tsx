@@ -8,6 +8,7 @@ import { docLines } from "@/lib/changes";
 import { fmtNum } from "@/lib/format";
 import { ExpDocForm, type DocLine } from "@/components/ExpDocForm";
 import { AttachmentsPanel } from "@/components/AttachmentsPanel";
+import { RenameDocNo } from "@/components/RenameDocNo";
 import { attachmentsOf, docHistory } from "@/lib/expExtras";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +35,10 @@ export default async function ExpDocument({ params }: { params: Promise<{ id: st
   const header = { docNo: base, payDate: first.payDate, valueDate: first.valueDate, mode: first.mode, branch: first.branch, narration: first.narration };
   return (
     <div className="space-y-4">
-      <h1 className="h1">Exp document {base}</h1>
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="h1 !mb-0">Exp document {base}</h1>
+        {user.role === "master" && (line.docBase || line.docNo) && <RenameDocNo base={base} lines={rows.length} />}
+      </div>
       <p className="text-sm text-[var(--muted)]">{user.role === "master" ? "Changes are saved immediately." : "Edits and deletions go to the Master for approval."}</p>
       <ExpDocForm key={base} role={user.role} {...f} docBase={base} knownBookings={known} initial={{ header, lines }} />
       <AttachmentsPanel base={base} userId={user.id} isMaster={user.role === "master"}

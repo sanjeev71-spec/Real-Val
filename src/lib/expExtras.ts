@@ -22,6 +22,7 @@ export function describeChange(action: string, data: Row, before: Row | null): s
   const lines = (x: Row | null) => (Array.isArray(x?.lines) ? (x!.lines as Row[]) : []);
   if (action === "create_doc") return `Created with ${lines(data).length} line(s)`;
   if (action === "merge_docs") return `Merged ${lines(data).length} entries into this document (${lines(data).map((l) => l.docNo).join(", ")})`;
+  if (action === "rename_docno") return `DocNo changed from ${String(data.fromBase ?? "")} to ${String(data.newBase ?? "")}${lines(data).length > 1 ? ` (${lines(data).length} lines renumbered)` : ""}`;
   if (action === "split_line") return `Line ${lines(data)[0]?.docNo ?? ""} split out into its own document`;
   if (action === "delete_doc") return `Deleted (${lines(before).length} line(s))`;
   if (action === "update_doc") {
@@ -67,19 +68,31 @@ function describeUpload(data: Row, lineDocNos: string[], base: string): string {
 /** Everything that was requested, approved or rejected for one Exp document, newest first. */
 export async function docHistory(base: string, lineDocNos: string[] = []): Promise<HistoryItem[]> {
   const db = await getDb();
-  const likeLines = lineDocNos.length ? lineDocNos : [base];
+  const likeLines = lineDocNos.length ? [...lineDocNos] : [base];
+  // a document whose number was changed keeps the history of its earlier numbers
+  const bases = [base];
+  for (let i = 0; i < bases.length && i < 20; i++) {
+    const rn = rowsOf(await db.execute(sql`select data->>'fromBase' as fb, before from change_requests where entity = 'exp' and action = 'rename_docno' and status = 'approved' and data->>'newBase' = ${bases[i]}`));
+    for (const x of rn) {
+      const fb = String(x.fb ?? "");
+      if (fb && !bases.includes(fb)) bases.push(fb);
+      for (const l of (((x.before as Row | null)?.lines ?? []) as Row[])) if (l.docNo && !likeLines.includes(String(l.docNo))) likeLines.push(String(l.docNo));
+    }
+  }
+  const arr = (xs: string[]) => sql.raw(`array[${xs.map((x) => `'${x.replace(/'/g, "''")}'`).join(",")}]::text[]`);
+  const baseArr = arr(bases);
   const r = rowsOf(await db.execute(sql`
     select cr.id, cr.action, cr.status, cr.comment, cr.created_at, cr.decided_at, cr.data, cr.before,
            ru.name as req_name, du.name as dec_name
     from change_requests cr
     left join users ru on ru.id = cr.requested_by
     left join users du on du.id = cr.decided_by
-    where cr.entity = 'exp' and (cr.data->>'docBase' = ${base} or cr.before->>'docBase' = ${base} or cr.result_ref = ${base} or cr.data->'mergedBases' @> to_jsonb(${base}::text)
+    where cr.entity = 'exp' and (cr.data->>'docBase' = any(${baseArr}) or cr.before->>'docBase' = any(${baseArr}) or cr.result_ref = any(${baseArr}) or exists (select 1 from jsonb_array_elements_text(coalesce(cr.data->'mergedBases','[]'::jsonb)) mb where mb = any(${baseArr}))
        or cr.data->>'docNo' = any(${sql.raw(`array[${likeLines.map((x) => `'${x.replace(/'/g, "''")}'`).join(",")}]::text[]`)})
        or (cr.action = 'bulk_upload' and (
             exists (select 1 from jsonb_array_elements(coalesce(cr.data->'updates','[]'::jsonb)) u where u->>'docNo' = any(${sql.raw(`array[${likeLines.map((x) => `'${x.replace(/'/g, "''")}'`).join(",")}]::text[]`)}))
-         or exists (select 1 from jsonb_array_elements(coalesce(cr.data->'creates','[]'::jsonb)) c where c->>'docBase' = ${base} or c->>'docNo' = ${base})
-         or exists (select 1 from jsonb_array_elements(coalesce(cr.data->'adds','[]'::jsonb)) a where a->>'docBase' = ${base}))))
+         or exists (select 1 from jsonb_array_elements(coalesce(cr.data->'creates','[]'::jsonb)) c where c->>'docBase' = any(${baseArr}) or c->>'docNo' = any(${baseArr}))
+         or exists (select 1 from jsonb_array_elements(coalesce(cr.data->'adds','[]'::jsonb)) a where a->>'docBase' = any(${baseArr})))))
     order by cr.id desc
     limit 100`));
   return r.map((x) => ({

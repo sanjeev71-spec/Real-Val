@@ -172,6 +172,7 @@ async function applyExp(tx: Tx, action: string, targetId: number | null, d: ExpD
   if (action === "bulk_upload") return applyBulkUpload(tx, d as never, before, userId);
   if (action === "merge_docs") return applyMerge(tx, d as never);
   if (action === "split_line") return applySplit(tx, d as never);
+  if (action === "rename_docno") return applyRename(tx, d as never);
   if (action.endsWith("_doc")) return applyExpDoc(tx, action, d as unknown as ExpDocData, userId);
   if (action === "create") {
     const docNo = await nextDocNo(tx, d.mode as string | null);
@@ -735,6 +736,59 @@ async function applySplit(tx: Tx, d: { lineId?: number }): Promise<string> {
   const base = await nextDocBase(tx, line.mode);
   await tx.update(s.expEntries).set({ docBase: base, lineNo: null, docNo: base, updatedAt: new Date() }).where(eq(s.expEntries.id, line.id));
   return base;
+}
+
+// =================================================================== change the number of a document (Master only)
+
+/** The new number of every line: the old base at the start of a line number is replaced (RP00012-03 -> NEW-03); a one-line document becomes the new number. */
+export async function previewRename(db: DB | Tx, oldBase: string, typed: string) {
+  const newBase = typed.trim();
+  if (!validDocBase(newBase)) return { ok: false as const, message: "Use letters, digits and - _ . / only (2 to 40 characters)" };
+  if (splitDocNo(newBase).line !== null) return { ok: false as const, message: `${newBase} looks like a line of document ${splitDocNo(newBase).base} - choose a number without a -NN line ending` };
+  if (newBase === oldBase) return { ok: false as const, message: "The new number is the same as the current one" };
+  const cur = await docLines(db, oldBase);
+  if (!cur.length) return { ok: false as const, message: `Document ${oldBase} no longer exists` };
+  const single = cur.length === 1 && cur[0].lineNo === null;
+  const plan = cur.map((r, i) => {
+    const was = r.docNo ?? "";
+    let will: string;
+    if (single) will = newBase;
+    else if (was.toLowerCase().startsWith(oldBase.toLowerCase() + "-")) will = newBase + was.slice(oldBase.length);
+    else will = lineDocNo(newBase, r.lineNo ?? i + 1);
+    return { id: r.id, was, will, row: r };
+  });
+  const ids = new Set(cur.map((r) => r.id));
+  if (new Set(plan.map((p) => p.will.toLowerCase())).size !== plan.length) return { ok: false as const, message: "Two lines would get the same number" };
+  const taken = await db.select({ id: s.expEntries.id, docNo: s.expEntries.docNo }).from(s.expEntries)
+    .where(or(sql`lower(${s.expEntries.docBase}) = ${newBase.toLowerCase()}`, inArray(sql`lower(${s.expEntries.docNo})`, plan.map((p) => p.will.toLowerCase()))));
+  const clash = taken.find((t) => !ids.has(t.id));
+  if (clash) return { ok: false as const, message: `The number ${clash.docNo ?? newBase} is already used by another entry` };
+  return { ok: true as const, oldBase, newBase, plan };
+}
+
+export async function requestRename(user: User, oldBase: string, typed: string): Promise<ChangeResult> {
+  if (user.role !== "master") return { ok: false, errors: {}, message: "Only the Master can change a document number." };
+  const db = await getDb();
+  const p = await previewRename(db, oldBase, typed);
+  if (!p.ok) return { ok: false, errors: { docNo: p.message }, message: p.message };
+  const lines = p.plan.map((x) => ({ ...Object.fromEntries(EXP_FIELDS.map((k) => [k, x.row[k] ?? null])), id: x.id, docNo: x.will }));
+  try {
+    return await submit(user, "exp", "rename_docno", null, { docBase: p.newBase, fromBase: p.oldBase, newBase: p.newBase, lines } as never, { docBase: p.oldBase, lines: p.plan.map((x) => ({ id: x.id, docNo: x.was })) });
+  } catch (e) {
+    return { ok: false, errors: {}, message: (e as Error).message };
+  }
+}
+
+async function applyRename(tx: Tx, d: { fromBase?: string; newBase?: string }): Promise<string> {
+  const p = await previewRename(tx, d.fromBase ?? "", d.newBase ?? "");
+  if (!p.ok) throw new Error(p.message);
+  // two steps so that a line number never clashes with another line of the same document on the way
+  for (const x of p.plan) await tx.update(s.expEntries).set({ docNo: `~rn${x.id}` }).where(eq(s.expEntries.id, x.id));
+  for (const x of p.plan) {
+    await tx.update(s.expEntries).set({ docBase: p.newBase, docNo: x.will, lineNo: p.plan.length === 1 && x.will === p.newBase ? null : splitDocNo(x.will).line ?? x.row.lineNo, updatedAt: new Date() }).where(eq(s.expEntries.id, x.id));
+  }
+  await tx.update(s.expAttachments).set({ docBase: p.newBase }).where(eq(s.expAttachments.docBase, p.oldBase));
+  return p.newBase;
 }
 
 // =================================================================== shared request / approval
