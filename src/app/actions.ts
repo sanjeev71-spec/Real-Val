@@ -1,4 +1,5 @@
 "use server";
+import { canUploadEmp } from "@/lib/company";
 import { revalidatePath as revalidate } from "next/cache";
 import { bumpData } from "@/lib/cache";
 
@@ -411,7 +412,8 @@ export async function bkgEditAction(bkgId: string, data: Record<string, unknown>
 
 // ---- Emp upload: new employees, history changes, corrections and exits (Master applies at once, HR needs Master approval)
 export async function empUploadCheckAction(form: FormData): Promise<{ ok: boolean; message?: string; rows?: EmpUploadRow[]; warnings?: string[] }> {
-  await requireUser(["hr", "master"]);
+  const user = await requireUser(["hr", "master"]);
+  if (!canUploadEmp(user.role)) return { ok: false, message: "Only Master can upload Emp." };
   try {
     const { rows } = await readFile(form);
     const p = await prepareEmpUpload(rows);
@@ -424,6 +426,7 @@ export async function empUploadCheckAction(form: FormData): Promise<{ ok: boolea
 }
 export async function empUploadCommitAction(form: FormData): Promise<{ ok: boolean; message?: string; applied?: boolean; id?: number; count?: number }> {
   const user = await requireUser(["hr", "master"]);
+  if (!canUploadEmp(user.role)) return { ok: false, message: "Only Master can upload Emp." };
   try {
     const { name, rows } = await readFile(form);
     const p = await prepareEmpUpload(rows);

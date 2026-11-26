@@ -4,7 +4,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { currentUser } from "@/lib/auth";
 import { signOutAction } from "./actions";
-import { COMPANY } from "../lib/company";
+import { COMPANY, canUploadEmp } from "../lib/company";
 import { NavBar, type NavGroup, type NavItem } from "@/components/NavBar";
 import { DensityToggle } from "@/components/DensityToggle";
 import { NavProgress } from "@/components/NavProgress";
@@ -24,7 +24,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     ? [
         { label: "Sales", items: [...item("/scd/new", `New ${COMPANY.form}`, role !== "hr"), ...item("/submissions", `${COMPANY.form} Approval`, role !== "hr"), ...item("/bookings", "Bkg", role !== "hr"), ...item("/bulk", "Upload Bkg", masterOrAdmin), ...item("/reports/demand", "Demand", role !== "hr")] },
         { label: "Accounts", items: [...item("/exp", "Exp", masterOrAdmin), ...item("/bulk/exp", "Upload Exp", masterOrAdmin), ...item("/bulk/all", "Bkg + Exp + Emp file", role === "master"), ...item("/changes", "Exp/Emp/Bkg approvals", role !== "sales"), ...item("/reports/pnl", "P&L", role === "master"), ...item("/reports/director-pack", "Director P&L packs", role === "master"), ...item("/reports/projection", "Projection", masterOrAdmin), ...item("/reports/exceptions", "Data exceptions", masterOrAdmin)] },
-        { label: "People", items: [...item("/emp", "Emp", role === "hr" || role === "master"), ...item("/bulk/emp", "Upload Emp", role === "hr" || role === "master"), ...item("/reports/org", "Org chart", role !== "sales")] },
+        { label: "People", items: [...item("/emp", "Emp", role === "hr" || role === "master"), ...item("/bulk/emp", "Upload Emp", canUploadEmp(role)), ...item("/reports/org", "Org chart", role !== "sales")] },
         { label: "Admin", items: [...item("/admin/masters", "Masters", role === "master"), ...item("/admin/masters/projects", "Projects", COMPANY.manualMasters && masterOrAdmin), ...item("/admin/masters/pricelist", "Price list", COMPANY.manualMasters && masterOrAdmin), ...item("/admin/masters/inventory", "Inventory", COMPANY.manualMasters && masterOrAdmin), ...item("/admin/projection", "Projection targets", role === "master"), ...item("/admin/users", "Users", role === "master"), ...item("/admin/cleanup", "Clean-up", role === "master")] },
       ].filter((g) => g.items.length)
     : [];

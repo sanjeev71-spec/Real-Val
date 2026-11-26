@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
+import { canUploadEmp } from "@/lib/company";
 import { currentPeriods, employeesWithCalc } from "@/lib/data";
 import { fmtDate } from "@/lib/format";
 
@@ -7,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export default async function EmpList({ searchParams }: { searchParams: Promise<{ q?: string; all?: string }> }) {
-  await requireUser(["hr", "master"]);
+  const user = await requireUser(["hr", "master"]);
   const { q = "", all } = await searchParams;
   const rows = currentPeriods(await employeesWithCalc());
   const n = q.trim().toLowerCase();
@@ -20,7 +21,7 @@ export default async function EmpList({ searchParams }: { searchParams: Promise<
         <h1 className="h1">Employees (Emp)</h1>
         <span className="text-sm text-[var(--muted)]">{shown.length} shown</span>
         <a className="btn ml-auto" href="/api/export/emp">Download Emp (.xlsx)</a>
-        <Link className="btn" href="/bulk/emp">Upload Emp (template)</Link>
+        {canUploadEmp(user.role) && <Link className="btn" href="/bulk/emp">Upload Emp (template)</Link>}
         <Link className="btn btn-primary" href="/emp/new">+ New employee</Link>
       </div>
       <form className="flex flex-wrap items-center gap-2">

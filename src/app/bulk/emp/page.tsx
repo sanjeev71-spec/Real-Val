@@ -1,4 +1,6 @@
+import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
+import { canUploadEmp } from "@/lib/company";
 import { EmpUploadForm } from "@/components/EmpUploadForm";
 
 export const dynamic = "force-dynamic";
@@ -6,6 +8,7 @@ export const maxDuration = 60;
 
 export default async function UploadEmpPage() {
   const user = await requireUser(["hr", "master"]);
+  if (!canUploadEmp(user.role)) notFound();
   const isMaster = user.role === "master";
   return (
     <div className="space-y-4">

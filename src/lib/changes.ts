@@ -8,6 +8,7 @@ import { str } from "./calc/excel";
 import { parseDate } from "./validate";
 import { parsePasteMonth } from "./pasteLines";
 import type { User } from "./auth";
+import { canUploadEmp } from "./company";
 import { COMPANY } from "./company";
 import { resyncEmployees } from "./empSync";
 import { lineDocNo, splitDocNo, validDocBase } from "./docNo";
@@ -353,7 +354,7 @@ export function buildEmp(action: EmpAction, raw: Record<string, unknown>, ctx: E
 /** Emp upload: one all-or-nothing change. HR waits for Master approval; Master applies at once. */
 export interface EmpUploadItem { row: number; action: EmpAction; data: Record<string, unknown> }
 export async function requestEmpUpload(user: User, fileName: string, items: EmpUploadItem[]): Promise<ChangeResult> {
-  if (user.role !== "hr" && user.role !== "master") return { ok: false, errors: {}, message: "Only HR or Master can upload Emp." };
+  if (!canUploadEmp(user.role)) return { ok: false, errors: {}, message: "You are not allowed to upload Emp." };
   if (!items.length) return { ok: false, errors: {}, message: "Nothing to add or change in this file." };
   try {
     return await submit(user, "emp", "bulk_upload", null, { fileName, items } as never, null);
