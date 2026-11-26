@@ -25,17 +25,19 @@ export interface Company {
   defaultPartners: string[];
   /** true = Project, Unit, Builder, Area and the price-list fields are typed on the booking (masters only suggest them). */
   manualMasters: boolean;
+  /** true = UnitNo may be blank and the same unit may be on several bookings (no unit checks). */
+  freeUnits: boolean;
 }
 
 const COMPANIES: Record<Company["key"], Company> = {
   realv: {
     key: "realv", name: "Realty Vault", legalName: "Realty Vault Pvt. Ltd.", form: "SCD", formLong: "Sale Confirmation Dossier",
-    idPrefix: "RV", idDigits: 4, topCode: "200001", empCompany: "RV", idExample: "RV0001", gstRate: 0.12, gstManual: false, manualMasters: false,
+    idPrefix: "RV", idDigits: 4, topCode: "200001", empCompany: "RV", idExample: "RV0001", gstRate: 0.12, gstManual: false, manualMasters: false, freeUnits: false,
     defaultPartners: ["Pratham Goyal~100031", "Pawan Bedi~200001", "Tarun Kumar~100030", "Aditya Goel~200002"],
   },
   trpl: {
     key: "trpl", name: "Truevisory Realty", legalName: "Truevisory Realty Pvt. Ltd.", form: "SIF", formLong: "Sales Information Form",
-    idPrefix: "TRPL", idDigits: 4, topCode: "TV0022", empCompany: "Truevisory Realty Pvt Ltd", idExample: "TRPL5200", gstRate: 0, gstManual: true, manualMasters: true,
+    idPrefix: "TRPL", idDigits: 4, topCode: "TV0022", empCompany: "Truevisory Realty Pvt Ltd", idExample: "TRPL5200", gstRate: 0, gstManual: true, manualMasters: true, freeUnits: true,
     defaultPartners: ["Aman Jain~TV0022"],
   },
 };

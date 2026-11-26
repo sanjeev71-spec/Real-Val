@@ -188,7 +188,7 @@ export async function bkgTemplateXlsx(): Promise<Buffer> {
   const help = wb.addWorksheet("Instructions");
   [
     ["TO ADD NEW BOOKINGS: fill rows with a blank BkgID (delete the example row 2 first). Save as .xlsx or CSV (UTF-8)."],
-    ["Required for a new booking: BkgLoginDate, Emp, Client, Project, UnitNo, FormStatus."],
+    [COMPANY.freeUnits ? "Required for a new booking: BkgLoginDate, Emp, Client, Project, FormStatus. UnitNo may be blank, and the same unit may appear on more than one booking." : "Required for a new booking: BkgLoginDate, Emp, Client, Project, UnitNo, FormStatus."],
     [`BkgID: leave blank to auto-generate (${COMPANY.idExample}...). Type one only to keep an ID from another system.`],
     ["Dates: dd-mm-yyyy or yyyy-mm-dd. BkgMonth defaults to BkgLoginDate."],
     ...(COMPANY.manualMasters ? [["Project MUST exist in the Project Master (Admin > Projects) - a row with any other project is rejected with the reason; add the project there first. Builder and ProjectLocation: leave them blank - they are filled from the Project Master (if you type them they must be the same as in the master, otherwise the row is rejected)."],, ["UnitNo, Area, PaymentPlan, BSPPSF, OtherChargesPSF, DSlab and DSlabType are TYPED in the file - they need not exist in any master. A blank one on a NEW booking is suggested from the Inventory / Price List masters when they have it; otherwise it stays blank. Branch is taken from the Associate's Emp row on the booking date when blank."]] : [["Blank cells of a NEW booking are filled automatically: Builder/ProjectLocation (Project), Area (Inventory), BSPPSF/OtherChargesPSF/PaymentPlan/DSlab/DSlabType (Price List on the booking date), Branch (Associate's Emp row on the booking date)."]]),

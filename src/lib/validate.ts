@@ -67,7 +67,7 @@ export function validateBooking(d: FormData, m: MasterData, o: ValidateOpts): Er
   req("Emp", "Associate");
   req("Client", "Applicant name");
   req("Project", "Project");
-  req("UnitNo", "Unit");
+  if (!COMPANY.freeUnits) req("UnitNo", "Unit");
   req("FormStatus", "Form status");
   if (o.mode === "scd") {
     req("ContactNo", "Mobile 1");
@@ -105,10 +105,10 @@ export function validateBooking(d: FormData, m: MasterData, o: ValidateOpts): Er
     const pname = (proj?.name ?? str(d.Project)).toLowerCase();
     const unit = m.inventory.find((u) => u.project.toLowerCase() === pname && u.unitNo === str(d.UnitNo));
     if (!unit && !manual) e.UnitNo = "Unit not in inventory for this project";
-    else if (unit && SOLD_STATUSES.includes(str(d.FormStatus)) && unit.status !== "Available")
+    else if (!COMPANY.freeUnits && unit && SOLD_STATUSES.includes(str(d.FormStatus)) && unit.status !== "Available")
       e.UnitNo = `Unit is ${unit.status.toLowerCase()}`;
     const k = `${pname}|${str(d.UnitNo)}`;
-    if (o.takenInBatch?.has(k) && SOLD_STATUSES.includes(str(d.FormStatus))) e.UnitNo = "Same unit appears twice in this file";
+    if (!COMPANY.freeUnits && o.takenInBatch?.has(k) && SOLD_STATUSES.includes(str(d.FormStatus))) e.UnitNo = "Same unit appears twice in this file";
   }
   if (o.mode === "scd" && !manual && proj && d.BkgLoginDate && !priceListFor(m, d.Project, d.BkgLoginDate))
     e.BkgLoginDate = "No price list covers this project on this date — ask the back office to update the price list";

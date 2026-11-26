@@ -193,7 +193,7 @@ export function ScdForm({ masters, initial, role, mode }: { masters: MasterData;
         {MANUAL ? pick("Builder", "Builder") : txt("Builder", "Builder", { ro: true })}
         {MANUAL ? pick("ProjectLocation", "Project location") : txt("ProjectLocation", "Project location", { ro: true })}
         {MANUAL ? (
-          <Field k="UnitNo" label="Unit no." req errors={errors}>
+          <Field k="UnitNo" label="Unit no." req={!COMPANY.freeUnits} errors={errors}>
             <input id="UnitNo" className="input" list="unit-list" value={String(d.UnitNo ?? "")} onChange={(e) => set("UnitNo", e.target.value || null)} />
             <datalist id="unit-list">{units.map((u) => <option key={u.unitNo} value={u.unitNo} />)}</datalist>
           </Field>
