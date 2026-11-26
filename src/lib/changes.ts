@@ -318,8 +318,15 @@ export function buildEmp(action: EmpAction, raw: Record<string, unknown>, ctx: E
       const f = cleanEmpFields(raw, [...(older ? EMP_PERSON_FIELDS.filter((k) => !(SHARED_PERSON_FIELDS as readonly string[]).includes(k)) : EMP_PERSON_FIELDS), "remarks", "designation", "department", "applicable", "seatChargeStart", "revShare", "expShare"]);
       checkShare("revShare", f.revShare);
       checkShare("expShare", f.expShare);
-      const changed = Object.fromEntries(Object.entries(f).filter(([k, v]) => String((target as never)[k] ?? "") !== String(v ?? "")));
-      if (!Object.keys(changed).length) e.form = "Nothing was changed";
+      const changed: Record<string, unknown> = Object.fromEntries(Object.entries(f).filter(([k, v]) => String((target as never)[k] ?? "") !== String(v ?? "")));
+      // the exit date of an employee who has left: the end of their last period
+      if (!older && cur.changeDateTo && raw.exitDate !== undefined) {
+        const xd = parseDate(raw.exitDate ?? "");
+        if (!isDate(xd)) e.exitDate = "Exit date is required (use New employee to re-join)";
+        else if (xd! < cur.changeDateFrom) e.exitDate = `Cannot be before the period start (${cur.changeDateFrom})`;
+        else if (xd !== cur.changeDateTo) changed.exitDate = xd;
+      }
+      if (!Object.keys(changed).length && !e.exitDate) e.form = "Nothing was changed";
       data = { code: codeOf(cur.emp), emp: cur.emp, periodId: target.id, changes: changed };
     }
     if (action === "exit") {
@@ -432,7 +439,9 @@ async function applyEmpAction(tx: Tx, action: string, d: Record<string, unknown>
   }
   if (action === "correct") {
     // the chosen period row only (the current one unless another was picked); other history rows keep their values
-    await tx.update(s.employees).set(d.changes as never).where(eq(s.employees.id, d.periodId as number));
+    const ch = { ...(d.changes as Record<string, unknown>) };
+    if (ch.exitDate) ch.changeDateTo = ch.exitDate; // a corrected exit date moves the end of the last period
+    await tx.update(s.employees).set(ch as never).where(eq(s.employees.id, d.periodId as number));
     // DOB, father's name, PAN, bank... are the same on every row of the employee: copy them to all periods
     const shared = Object.fromEntries(Object.entries(d.changes as Record<string, unknown>).filter(([k]) => (SHARED_PERSON_FIELDS as readonly string[]).includes(k)));
     if (Object.keys(shared).length) await tx.update(s.employees).set(shared as never).where(eq(s.employees.emp, d.emp as string));

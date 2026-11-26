@@ -15,6 +15,7 @@ export function EmpEditor(p: {
   current?: Record<string, Val>; // the current period (for change / correct / exit)
   reportees?: string[]; // people reporting to this employee now (for exit)
   periodOnly?: boolean; // correcting an earlier period: its own fields only
+  exitEditable?: boolean; // correcting the last period of someone who has left: the exit date can be corrected
 }) {
   const router = useRouter();
   const today = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
@@ -22,6 +23,7 @@ export function EmpEditor(p: {
     p.mode === "create" ? { type: "Sales", applicable: "Y", company: COMPANY.empCompany, status: "Active", doj: today } : { ...(p.current ?? {}) };
   if (p.mode === "change") init.effectiveFrom = today;
   if (p.mode === "exit") init.exitDate = today;
+  if (p.mode === "correct" && p.exitEditable) init.exitDate = (p.current?.changeDateTo ?? p.current?.exitDate ?? null) as Val;
   const [d, setD] = useState<Record<string, Val>>(init);
   const [reassign, setReassign] = useState<Record<string, string>>(
     Object.fromEntries((p.reportees ?? []).map((r) => [r, String(p.current?.reportingHead ?? "")])),
@@ -34,7 +36,7 @@ export function EmpEditor(p: {
   const fields: EmpField[] =
     p.mode === "create" ? [...PERIOD_FIELDS.filter((f) => f.key !== "status"), ...PERSON_FIELDS]
     : p.mode === "change" ? PERIOD_FIELDS
-    : p.mode === "correct" ? (p.periodOnly ? CORRECT_FIELDS.filter((f) => !SHARED_PERSON_FIELDS.includes(f.key as never)) : CORRECT_FIELDS)
+    : p.mode === "correct" ? [...(p.periodOnly ? CORRECT_FIELDS.filter((f) => !SHARED_PERSON_FIELDS.includes(f.key as never)) : CORRECT_FIELDS), ...(p.exitEditable ? [{ key: "exitDate", label: "Exit date", type: "date" as const, hint: "Last working day. Must not be before the start of this period." }] : [])]
     : [];
 
   function submit() {

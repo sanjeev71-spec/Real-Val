@@ -89,7 +89,7 @@ export default async function EmpPage({ params, searchParams }: { params: Promis
             </div>
             {sel.id !== cur.id && <p className="mt-2 text-sm text-[var(--muted)]">An earlier period: only its own fields (DOJ, salary, designation, department, shares, seat cost, remarks) can be corrected here. DOB, father's name, PAN, bank etc. are the same on every period: correct them on the current period and they update all rows.</p>}
           </section>
-          <EmpEditor key={sel.id} mode="correct" role={user.role} employees={names} current={selected as never} periodOnly={sel.id !== cur.id} />
+          <EmpEditor key={sel.id} mode="correct" role={user.role} employees={names} current={selected as never} periodOnly={sel.id !== cur.id} exitEditable={exited && sel.id === cur.id} />
         </>
       )}
       {tab === "exit" && !exited && <EmpEditor mode="exit" role={user.role} employees={names} current={current as never} reportees={reportees} />}
