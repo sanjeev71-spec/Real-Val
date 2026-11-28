@@ -90,7 +90,9 @@ export async function syncBookingEvents(): Promise<{ events: number; history: bo
   const [{ n: snaps }] = (await db.select({ n: sql<number>`count(*)::int` }).from(s.bookingSnapshots)) as { n: number }[];
   const histPre = Number(snaps) === 0 ? await historyDates() : null;
   return db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(${LOCK})`);
+    // another sync is running: leave it to that one (whatever it misses, the next save or page visit picks up) - never wait
+    const lr = (await tx.execute(sql`select pg_try_advisory_xact_lock(${LOCK}) as ok`)) as unknown as { rows?: { ok: boolean }[] } | { ok: boolean }[];
+    if (!((("rows" in lr ? lr.rows : lr) as { ok: boolean }[])[0]?.ok)) return { events: 0, history: false };
     const prevRows = await tx.select().from(s.bookingSnapshots);
     const prev = new Map(prevRows.map((p) => [p.bkgId.toUpperCase(), p]));
     const [{ n }] = (await tx.select({ n: sql<number>`count(*)::int` }).from(s.bookingEvents)) as { n: number }[];
