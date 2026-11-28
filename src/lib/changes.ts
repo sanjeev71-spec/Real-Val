@@ -329,8 +329,24 @@ export function buildEmp(action: EmpAction, raw: Record<string, unknown>, ctx: E
         else if (xd! < cur.changeDateFrom) e.exitDate = `Cannot be before the period start (${cur.changeDateFrom})`;
         else if (xd !== cur.changeDateTo) changed.exitDate = xd;
       }
+      // DOJ is the start of the employee's first history row: a corrected DOJ moves that start (and is the DOJ of every row of that stint)
+      let dojMove: { firstId: number; ids: number[] } | undefined;
+      if (changed.doj !== undefined) {
+        const mine = rows.filter((r) => r.emp === cur.emp).sort((a, b) => a.changeDateFrom.localeCompare(b.changeDateFrom));
+        let i = mine.findIndex((r) => r.id === target.id);
+        // walk back over rows that follow on without a gap (a re-join after an exit starts a new stint)
+        while (i > 0 && mine[i - 1].changeDateTo && addDays(mine[i - 1].changeDateTo!, 1) === mine[i].changeDateFrom) i--;
+        const first = mine[i];
+        const stint = [first];
+        for (let j = i + 1; j < mine.length && stint[stint.length - 1].changeDateTo && addDays(stint[stint.length - 1].changeDateTo!, 1) === mine[j].changeDateFrom; j++) stint.push(mine[j]);
+        const doj = changed.doj as string | null;
+        if (!isDate(doj)) e.doj = "Date of joining is required";
+        else if (first.changeDateTo && doj! > first.changeDateTo) e.doj = `Cannot be after the end of the first history row (${first.changeDateTo}) - correct that row first`;
+        else if (i > 0 && mine[i - 1].changeDateTo && doj! <= mine[i - 1].changeDateTo!) e.doj = `Must be after the earlier exit (${mine[i - 1].changeDateTo})`;
+        else dojMove = { firstId: first.id, ids: stint.map((r) => r.id) };
+      }
       if (!Object.keys(changed).length && !e.exitDate) e.form = "Nothing was changed";
-      data = { code: codeOf(cur.emp), emp: cur.emp, periodId: target.id, changes: changed };
+      data = { code: codeOf(cur.emp), emp: cur.emp, periodId: target.id, changes: changed, ...(dojMove ? { dojMove } : {}) };
     }
     if (action === "exit") {
       const exitDate = parseDate(raw.exitDate ?? "");
@@ -448,6 +464,13 @@ async function applyEmpAction(tx: Tx, action: string, d: Record<string, unknown>
     // DOB, father's name, PAN, bank... are the same on every row of the employee: copy them to all periods
     const shared = Object.fromEntries(Object.entries(d.changes as Record<string, unknown>).filter(([k]) => (SHARED_PERSON_FIELDS as readonly string[]).includes(k)));
     if (Object.keys(shared).length) await tx.update(s.employees).set(shared as never).where(eq(s.employees.emp, d.emp as string));
+    // a corrected DOJ: every row of that stint carries it, and the first row starts on it
+    const mv = d.dojMove as { firstId: number; ids: number[] } | undefined;
+    const doj = (d.changes as Record<string, unknown>).doj as string | undefined;
+    if (mv && doj) {
+      await tx.update(s.employees).set({ doj }).where(inArray(s.employees.id, mv.ids));
+      await tx.update(s.employees).set({ changeDateFrom: doj }).where(eq(s.employees.id, mv.firstId));
+    }
     return String(d.emp);
   }
   if (action === "exit") {
