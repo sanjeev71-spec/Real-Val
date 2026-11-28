@@ -19,7 +19,13 @@ export async function bkgWorkbook(rowsAny: Row[], into?: ExcelJS.Workbook, event
   const wb = into ?? new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Bkg");
   const EXTRA = ["CancelDate", "RACloseDate"];
-  const cols = eventDates ? BKG_COLUMNS.flatMap((c) => (c === "FormStatus" ? [c, ...EXTRA] : [c])) : BKG_COLUMNS;
+  // the Data file's own order: the event dates after FormStatus, Project and Builder before Client, SourceOfLead and PropertyType before RC/RA
+  // (the upload reads columns by their heading, so the order does not matter there)
+  const MOVED = new Set(["SourceOfLead", "PropertyType", "Project", "Builder"]);
+  const cols = eventDates
+    ? BKG_COLUMNS.filter((c) => !MOVED.has(c)).flatMap((c) =>
+        c === "FormStatus" ? [c, ...EXTRA] : c === "Client" ? ["Project", "Builder", c] : c === "RC/RA" ? ["SourceOfLead", "PropertyType", c] : [c])
+    : BKG_COLUMNS;
   const isDate = (c: string) => DATE_KEYS.has(c) || EXTRA.includes(c);
   ws.columns = cols.map((c) => ({ header: EXTRA.includes(c) ? c : colName(c), key: c, width: Math.max(10, c.length + 2), style: isDate(c) ? { numFmt: "dd-mm-yyyy" } : {} }));
   const asDate = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00Z`) : v ?? null);
