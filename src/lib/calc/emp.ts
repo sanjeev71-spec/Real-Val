@@ -1,8 +1,9 @@
 // Calculated columns of the Excel Emp table (Director, DaysWorked, ManMonths, SeatCost, Key).
 import { codeOf, eq, round } from "./excel";
+import { COMPANY } from "../company";
 import { Hierarchy, type EmpRow } from "./hierarchy";
 
-export const SEAT_COST_PER_MONTH = 5000;
+export const SEAT_COST_PER_MONTH = COMPANY.seatCostPerMonth; // per company (RealV: 0 until seat cost is charged)
 export const SEAT_DAY_BASIS = 365;
 export const SEAT_EXEMPT_DAYS = 30;
 

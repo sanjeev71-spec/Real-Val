@@ -4,6 +4,7 @@ import { BKG_COLUMNS, BKG_INPUT_KEYS, DATE_KEYS, colName } from "@/lib/fields";
 import { CALC_CELL_COLOUR, CALC_COLOUR, EXP_DOWNLOAD_COLUMNS, EXP_GROUP_COL, EXP_REMARK_COL, FILL_COLOUR, REMARK_COLOUR, colNote, kindOfCol } from "@/lib/expLayout";
 import { sortBkgByDate } from "@/lib/bkgFilter";
 import type { employeesWithCalc } from "@/lib/data";
+import { SEAT_CHARGED } from "@/lib/company";
 
 // One place that builds the Bkg and Exp workbooks, so the Bkg, Exp and Data exceptions downloads always have the same format.
 type Row = Record<string, unknown>;
@@ -103,7 +104,7 @@ export async function empWorkbook(rows: Awaited<ReturnType<typeof employeesWithC
   const cols: [string, (r: (typeof rows)[number]) => unknown][] = [
     // typed columns that make a row an Emp upload action (blank Action = reference row, ignored on upload)
     ...([["Action", () => null], ["Emp Code", (r) => r.emp.split("~")[1] ?? ""], ["Name", () => null], ["Effective From", () => null], ["Exit Date", () => null], ["Reportees Move To", () => null]] as [string, (r: (typeof rows)[number]) => unknown][]),
-    ["Applicable", (r) => r.applicable], ["ManMonths", (r) => r.calc.manMonths], ["SeatCost", (r) => r.calc.seatCost],
+    ["Applicable", (r) => r.applicable], ["ManMonths", (r) => r.calc.manMonths], ...(SEAT_CHARGED ? [["SeatCost", (r: (typeof rows)[number]) => r.calc.seatCost] as [string, (r: (typeof rows)[number]) => unknown]] : []),
     ["Emp", (r) => r.emp], ["ReportingHead", (r) => r.reportingHead], ["Director", (r) => r.calc.director],
     ["Status", (r) => r.status], ["Gender", (r) => r.gender], ["Branch", (r) => r.branch], ["Type", (r) => r.type],
     ["RevShare", (r) => r.revShare], ["ExpShare", (r) => r.expShare], ["DOJ", (r) => r.doj],

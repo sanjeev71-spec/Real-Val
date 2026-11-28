@@ -7,6 +7,7 @@
 // L0 / L1 employees of each Exp row. F&F = ShareAmt - Paid Exp; P&L = ShareAmt x RA% - Paid Exp.
 import { codeOf } from "./excel";
 import { SEAT_COST_PER_MONTH, SEAT_DAY_BASIS } from "./emp";
+import { SEAT_CHARGED } from "../company";
 
 export const PNL_HEADS = [
   "Comm Paid", "Salary Paid", "Incentive", "F&F", "Seat Cost", "Travel", "Misc Income", "Car", "Advtg", "Drawings", "Rent",
@@ -106,11 +107,11 @@ export function seatCostFor(director: string, seats: PnlSeatRow[], f: number, t:
   return s;
 }
 
-/** Heads shown: the fixed list, only those with paid expense for this Director in the window (Seat Cost always). */
+/** Heads shown: the fixed list, only those with paid expense for this Director in the window (Seat Cost always, once it is charged). */
 export function pnlHeads(director: string, exps: PnlExp[], f: number, t: number): string[] {
   const has = new Set<string>();
   for (const e of exps) if (e.expType === "Expense" && same(e.director, director) && inWin(e.date, f, t)) has.add(e.head.toLowerCase());
-  return PNL_HEADS.filter((h) => has.has(h.toLowerCase()) || h === "Seat Cost");
+  return PNL_HEADS.filter((h) => has.has(h.toLowerCase()) || (h === "Seat Cost" && SEAT_CHARGED));
 }
 
 /** -(L0 + L1 amounts) of a head for a Director in the window; optionally only for one L0/L1 employee. */

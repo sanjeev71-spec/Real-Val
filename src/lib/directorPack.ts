@@ -6,6 +6,7 @@ import { CALC_COLOUR, EXP_FILL_COLS, FILL_COLOUR } from "./expLayout";
 import { codeOf, isoToSerial, num } from "./calc/excel";
 import type { BookingRow } from "./calc/booking";
 import type { employeesWithCalc } from "./data";
+import { SEAT_CHARGED } from "./company";
 
 type ExpRowAny = Record<string, unknown>;
 type EmpRows = Awaited<ReturnType<typeof employeesWithCalc>>;
@@ -259,10 +260,10 @@ export async function buildDirectorPack(inp: PackInput): Promise<Buffer> {
   ws3.views = [{ state: "frozen", ySplit: 1 }];
   ws3.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: eh.length } };
 
-  // ---- 4. Employee data with seat cost (every Emp period under this Director). Same layout as the Emp sheet of the Bkg + Exp + Emp file:
+  // ---- 4. Employee data with seat cost once charged (every Emp period under this Director). Same layout as the Emp sheet of the Bkg + Exp + Emp file:
   // a row is applied on upload only when its Action is filled (New / Change / Correct / Exit); blank Action = reference row.
   const ws4 = wb.addWorksheet("Employee Data");
-  const mh = ["Action", "Emp Code", "Name", "Effective From", "Exit Date", "Reportees Move To", "Emp", "ReportingHead", "Director", "Status", "Gender", "Branch", "Type", "RevShare", "ExpShare", "DOJ", "ChangeDateFrom", "ChangeDateTo", "Applicable", "ManMonths", "SeatCost"];
+  const mh = ["Action", "Emp Code", "Name", "Effective From", "Exit Date", "Reportees Move To", "Emp", "ReportingHead", "Director", "Status", "Gender", "Branch", "Type", "RevShare", "ExpShare", "DOJ", "ChangeDateFrom", "ChangeDateTo", "Applicable", "ManMonths", ...(SEAT_CHARGED ? ["SeatCost"] : [])]; // SeatCost only once it is charged
   const calcEmp = new Set(["Director", "ChangeDateFrom", "ChangeDateTo", "ManMonths", "SeatCost"]);
   hdrRow(ws4, mh, (c) => !calcEmp.has(c));
   const today = new Date().toISOString().slice(0, 10);
@@ -270,7 +271,7 @@ export async function buildDirectorPack(inp: PackInput): Promise<Buffer> {
   let seat = 0, mm = 0;
   for (const r of mine) {
     seat += r.calc.seatCost; mm += r.calc.manMonths;
-    const row = ws4.addRow([null, r.emp.split("~")[1] ?? "", null, null, null, null, r.emp, r.reportingHead, r.calc.director, r.status, r.gender, r.branch, r.type, r.revShare, r.expShare, asDate(r.doj ?? ""), asDate(r.changeDateFrom), asDate(r.changeDateTo ?? today), r.applicable, r.calc.manMonths, Math.round(r.calc.seatCost)]);
+    const row = ws4.addRow([null, r.emp.split("~")[1] ?? "", null, null, null, null, r.emp, r.reportingHead, r.calc.director, r.status, r.gender, r.branch, r.type, r.revShare, r.expShare, asDate(r.doj ?? ""), asDate(r.changeDateFrom), asDate(r.changeDateTo ?? today), r.applicable, r.calc.manMonths, ...(SEAT_CHARGED ? [Math.round(r.calc.seatCost)] : [])]);
     [4, 5, 16, 17, 18].forEach((c) => (row.getCell(c).numFmt = "dd-mm-yyyy"));
     row.getCell(14).numFmt = "0.0%"; row.getCell(15).numFmt = "0.0%"; row.getCell(20).numFmt = "0.00"; row.getCell(21).numFmt = NUM;
   }

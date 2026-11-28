@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { loadPnlData, pnlDirectors, todayIso } from "@/lib/data";
+import { loadPnlData, pnlDirectorInfo, pnlDirectors, todayIso } from "@/lib/data";
 import { computeDirectorSummary, computeTlSummary, computeYearSummary } from "@/lib/calc/pnl";
 import { isoToSerial } from "@/lib/calc/excel";
 import { fmtNum } from "@/lib/format";
-import { COMPANY } from "@/lib/company";
+import { COMPANY, SEAT_CHARGED } from "@/lib/company";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -27,7 +27,8 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
   const fromIso = /^\d{4}-\d{2}-\d{2}$/.test(q.from ?? "") ? q.from! : `${Number(today.slice(0, 4)) - 3}-01-01`;
   const toIso = /^\d{4}-\d{2}-\d{2}$/.test(q.to ?? "") ? q.to! : today;
   const from = isoToSerial(fromIso)!, to = isoToSerial(toIso)!;
-  const [data, directors] = await Promise.all([loadPnlData(), pnlDirectors()]);
+  const [data, directors, info] = await Promise.all([loadPnlData(), pnlDirectors(), pnlDirectorInfo()]);
+  const inactive = new Set(info.filter((d) => !d.active).map((d) => d.name));
   const topName = directors.find((d) => d.endsWith(`~${COMPANY.topCode}`));
   const director = q.director && directors.includes(q.director) ? q.director : topName ?? directors[0] ?? "";
   const href = (v: View) => `/reports/pnl?view=${v}&director=${encodeURIComponent(director)}&from=${fromIso}&to=${toIso}`;
@@ -41,7 +42,7 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
       </div>
       <p className="text-sm text-[var(--muted)]">
         Live and Not Live bookings in the period. <b>ShareAmt</b> = revenue share earned; <b>ShareAmt × RA%</b> = the part earned on recovered revenue.
-        <b> F&amp;F</b> = ShareAmt − paid expenses; <b>P&amp;L</b> = ShareAmt × RA% − paid expenses. Seat cost is charged day by day to the Director.
+        <b> F&amp;F</b> = ShareAmt − paid expenses; <b>P&amp;L</b> = ShareAmt × RA% − paid expenses.{SEAT_CHARGED && " Seat cost is charged day by day to the Director."}
       </p>
 
       <form className="card flex flex-wrap items-end gap-3" method="get">
@@ -50,7 +51,7 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
           <div>
             <label className="label" htmlFor="director">Director</label>
             <select id="director" name="director" className="input" defaultValue={director}>
-              {directors.map((d) => <option key={d} value={d}>{d}</option>)}
+              {directors.map((d) => <option key={d} value={d} style={inactive.has(d) ? { color: "#dc2626" } : undefined}>{d}{inactive.has(d) ? " (inactive)" : ""}</option>)}
             </select>
           </div>
         )}
@@ -67,7 +68,7 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
 
       {view === "tl" && <TlView {...tlProps(data, director, from, to)} />}
       {view === "year" && <YearView {...yearProps(data, director, from, to)} />}
-      {view === "director" && <DirectorView rows={computeDirectorSummary(data, directors, from, to).filter((r) => r.revInc || r.share || r.exp)} />}
+      {view === "director" && <DirectorView inactive={inactive} rows={computeDirectorSummary(data, directors, from, to).filter((r) => r.revInc || r.share || r.exp)} />}
     </div>
   );
 }
@@ -130,7 +131,7 @@ function YearView({ s, director }: { s: ReturnType<typeof computeYearSummary>; d
   );
 }
 
-function DirectorView({ rows }: { rows: ReturnType<typeof computeDirectorSummary> }) {
+function DirectorView({ rows, inactive }: { rows: ReturnType<typeof computeDirectorSummary>; inactive: Set<string> }) {
   const t = rows.reduce((a, r) => ({ revInc: a.revInc + r.revInc, share: a.share + r.share, shareRA: a.shareRA + r.shareRA, exp: a.exp + r.exp, ff: a.ff + r.ff, pl: a.pl + r.pl }), { revInc: 0, share: 0, shareRA: 0, exp: 0, ff: 0, pl: 0 });
   return (
     <div className="card overflow-x-auto">
@@ -146,7 +147,7 @@ function DirectorView({ rows }: { rows: ReturnType<typeof computeDirectorSummary
           </tr>
           {rows.map((r) => (
             <tr key={r.director}>
-              <td>{r.director}</td><td className={`text-right ${neg(r.ff)}`}>{money(r.ff)}</td><td className={`text-right ${neg(r.pl)}`}>{money(r.pl)}</td>
+              <td className={inactive.has(r.director) ? "font-semibold text-red-600" : ""} title={inactive.has(r.director) ? "Inactive" : undefined}>{r.director}</td><td className={`text-right ${neg(r.ff)}`}>{money(r.ff)}</td><td className={`text-right ${neg(r.pl)}`}>{money(r.pl)}</td>
               <td className="text-right">{money(r.revInc)}</td><td className="text-right">{money(r.share)}</td><td className="text-right">{money(r.shareRA)}</td><td className="text-right">{money(r.exp)}</td>
             </tr>
           ))}

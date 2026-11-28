@@ -5,6 +5,7 @@ import { currentPeriods, employeesWithCalc } from "@/lib/data";
 import { fmtDate, fmtNum } from "@/lib/format";
 import { PERSON_FIELDS } from "@/lib/empFields";
 import { EmpEditor } from "@/components/EmpEditor";
+import { SEAT_CHARGED } from "@/lib/company";
 
 export const dynamic = "force-dynamic";
 
@@ -47,13 +48,13 @@ export default async function EmpPage({ params, searchParams }: { params: Promis
           <section className="card overflow-x-auto">
             <h2 className="h2">Periods</h2>
             <table className="table">
-              <thead><tr><th>From</th><th>To</th><th>Reporting head</th><th>Director</th><th>Branch</th><th>Type</th><th>Designation</th><th>RevShare</th><th>ExpShare</th><th>Days</th><th className="text-right">Seat cost</th></tr></thead>
+              <thead><tr><th>From</th><th>To</th><th>Reporting head</th><th>Director</th><th>Branch</th><th>Type</th><th>Designation</th><th>RevShare</th><th>ExpShare</th><th>Days</th>{SEAT_CHARGED && <th className="text-right">Seat cost</th>}</tr></thead>
               <tbody>
                 {periods.map((p) => (
                   <tr key={p.id}>
                     <td>{fmtDate(p.changeDateFrom)}</td><td>{p.changeDateTo ? fmtDate(p.changeDateTo) : "current"}</td>
                     <td>{p.reportingHead}</td><td>{p.calc.director}</td><td>{p.branch}</td><td>{p.type}</td><td>{p.designation}</td>
-                    <td>{p.revShare ?? ""}</td><td>{p.expShare ?? ""}</td><td>{p.calc.daysWorked}</td><td className="text-right">{fmtNum(p.calc.seatCost)}</td>
+                    <td>{p.revShare ?? ""}</td><td>{p.expShare ?? ""}</td><td>{p.calc.daysWorked}</td>{SEAT_CHARGED && <td className="text-right">{fmtNum(p.calc.seatCost)}</td>}
                   </tr>
                 ))}
               </tbody>

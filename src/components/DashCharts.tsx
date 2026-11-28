@@ -114,8 +114,66 @@ export function GroupedChart({ title, labels, series, stacked = false, fmt = sho
   );
 }
 
+/**
+ * Horizontal bars, several series per row (one row per quarter / Director). Values are written at the end of each bar.
+ * Negative values grow to the LEFT of a bold zero line, on a light red band, with the value in red - so a loss reads at a glance.
+ * `badge` is a small figure in front of the row (e.g. "12 bkgs"); `red` writes the row label in red (inactive Director).
+ */
+export function HGroupedChart({ title, rows, series, fmt = short, note, hrefOf }: {
+  title: string; rows: { label: string; badge?: string; red?: boolean; values: number[] }[]; series: { name: string; colour: string }[];
+  fmt?: (v: number) => string; note?: string; hrefOf?: (label: string) => string | undefined;
+}) {
+  const W = 440, labW = 112, valPad = 44, barH = 14, gap = 3, rowPad = 7; // a narrow drawing, so the text stays large on a half-width card
+  const rowH = series.length * (barH + gap) - gap + rowPad * 2;
+  const all = rows.flatMap((r) => r.values);
+  const max = Math.max(0, ...all), min = Math.min(0, ...all), span = max - min || 1;
+  const plotX = labW + (min < 0 ? valPad : 4), plotW = W - plotX - valPad;
+  const x0 = plotX + (-min / span) * plotW; // the zero line
+  const H = rows.length * rowH + 4;
+  return (
+    <div className="card">
+      <div className="flex flex-wrap items-center gap-x-4">
+        <h2 className="h2 !mb-1">{title}</h2>
+        {series.map((s) => <span key={s.name} className="mb-1 flex items-center gap-1 text-[11px] text-[var(--muted)]"><i className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: s.colour }} />{s.name}</span>)}
+      </div>
+      {!rows.length && <p className="text-sm text-[var(--muted)]">No data.</p>}
+      {rows.length > 0 && (
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={title}>
+          {min < 0 && <rect x={plotX - 2} y={0} width={x0 - plotX + 2} height={H} fill="#ef4444" opacity={0.06} />}
+          {rows.map((r, i) => {
+            const y = 2 + i * rowH, href = hrefOf?.(r.label);
+            const label = r.label.length > 16 ? `${r.label.slice(0, 15)}…` : r.label;
+            const inner = (
+              <g>
+                {i > 0 && <line x1={0} y1={y} x2={W} y2={y} stroke="currentColor" opacity={0.07} />}
+                <text x={labW - 6} y={y + rowH / 2 + (r.badge ? -1 : 3.5)} textAnchor="end" fontSize="12" fontWeight="600" fill={r.red ? "#dc2626" : "currentColor"}>{label}<title>{r.red ? `${r.label} (inactive)` : r.label}</title></text>
+                {r.badge && <text x={labW - 6} y={y + rowH / 2 + 11} textAnchor="end" fontSize="10" fill="currentColor" opacity={0.6}>{r.badge}</text>}
+                {series.map((s, k) => {
+                  const v = r.values[k] ?? 0;
+                  const w = Math.max(v !== 0 ? 1.5 : 0, (Math.abs(v) / span) * plotW);
+                  const by = y + rowPad + k * (barH + gap);
+                  const bx = v >= 0 ? x0 : x0 - w;
+                  return (
+                    <g key={s.name}>
+                      <rect x={bx} y={by} width={w} height={barH} rx={2} fill={s.colour} opacity={0.92}><title>{`${r.label} - ${s.name}: ${fmt(v)}`}</title></rect>
+                      <text x={v >= 0 ? bx + w + 4 : bx - 4} y={by + barH - 2} textAnchor={v >= 0 ? "start" : "end"} fontSize="11" fontWeight="700" fill={v < 0 ? "#dc2626" : "currentColor"}>{fmt(v)}</text>
+                    </g>
+                  );
+                })}
+              </g>
+            );
+            return <g key={r.label}>{href ? <a href={href} style={{ cursor: "pointer" }}>{inner}</a> : inner}</g>;
+          })}
+          <line x1={x0} y1={0} x2={x0} y2={H} stroke="currentColor" strokeWidth={1.2} opacity={0.55} />
+        </svg>
+      )}
+      {note && <p className="text-[11px] text-[var(--muted)]">{note}</p>}
+    </div>
+  );
+}
+
 /** Ranked horizontal bars, every row in its own colour with the value at the end. */
-export function HBarChart({ title, rows, fmt = cr, note, hrefOf, wide = false }: { title: string; rows: { name: string; v: number; extra?: string }[]; fmt?: (v: number) => string; note?: string; hrefOf?: (name: string) => string | undefined; wide?: boolean }) {
+export function HBarChart({ title, rows, fmt = cr, note, hrefOf, wide = false, isRed }: { title: string; rows: { name: string; v: number; extra?: string }[]; fmt?: (v: number) => string; note?: string; hrefOf?: (name: string) => string | undefined; wide?: boolean; isRed?: (name: string) => boolean }) {
   // the value and the other figures of the row are written after the bar, separated by |
   const text = (r: { v: number; extra?: string }) => (r.extra ? `${fmt(r.v)} | ${r.extra}` : fmt(r.v));
   const W = wide ? 960 : 560, rowH = 24, labW = 150, n = rows.length;
@@ -133,7 +191,7 @@ export function HBarChart({ title, rows, fmt = cr, note, hrefOf, wide = false }:
             const label = r.name.length > 24 ? `${r.name.slice(0, 23)}…` : r.name;
             const inner = (
               <g>
-                <text x={labW - 6} y={y + 15} textAnchor="end" fontSize="10.5" fill="currentColor">{label}</text>
+                <text x={labW - 6} y={y + 15} textAnchor="end" fontSize="10.5" fontWeight={isRed?.(r.name) ? 600 : undefined} fill={isRed?.(r.name) ? "#dc2626" : "currentColor"}>{label}</text>
                 <rect x={labW} y={y + 3} width={w} height={rowH - 8} rx={3} fill={r.v < 0 ? "#ef4444" : PALETTE[i % PALETTE.length]} opacity={0.92}><title>{`${r.name}: ${text(r)}`}</title></rect>
                 <text x={labW + w + 5} y={y + 15} fontSize="10" fontWeight="600" fill="currentColor">{text(r)}</text>
               </g>
@@ -148,7 +206,7 @@ export function HBarChart({ title, rows, fmt = cr, note, hrefOf, wide = false }:
 }
 
 /** Share of a total as a ring with the legend (label, value and %). */
-export function Donut({ title, slices, fmt = (v: number) => String(Math.round(v)), centre, note }: { title: string; slices: { label: string; v: number; colour?: string }[]; fmt?: (v: number) => string; centre?: string; note?: string }) {
+export function Donut({ title, slices, fmt = (v: number) => String(Math.round(v)), centre, note, hrefOf }: { title: string; slices: { label: string; v: number; colour?: string; red?: boolean }[]; fmt?: (v: number) => string; centre?: string; note?: string; hrefOf?: (label: string) => string | undefined }) {
   const total = slices.reduce((s, x) => s + Math.max(0, x.v), 0);
   const R = 52, r = 32, C = 60;
   let a0 = -Math.PI / 2;
@@ -176,7 +234,9 @@ export function Donut({ title, slices, fmt = (v: number) => String(Math.round(v)
           {slices.map((s, i) => (
             <li key={s.label} className="flex items-center gap-2">
               <i className="inline-block h-3 w-3 rounded-sm" style={{ background: s.colour ?? PALETTE[i % PALETTE.length] }} />
-              <span>{s.label}</span>
+              {hrefOf?.(s.label)
+                ? <Link href={hrefOf(s.label)!} className={`hover:underline ${s.red ? "font-semibold text-red-600" : ""}`} title={s.red ? "Inactive" : undefined}>{s.label}</Link>
+                : <span className={s.red ? "font-semibold text-red-600" : ""} title={s.red ? "Inactive" : undefined}>{s.label}</span>}
               <b>{fmt(s.v)}</b>
               <span className="text-[var(--muted)]">{total ? `${((Math.max(0, s.v) / total) * 100).toFixed(0)}%` : ""}</span>
             </li>

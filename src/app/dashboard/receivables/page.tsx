@@ -50,6 +50,8 @@ export default async function ReceivablesDashboard({ searchParams }: { searchPar
       .slice(0, 12)
       .map((x) => ({ name: x.name, v: x.pendDue, extra: `Collections ${cr(x.collections)} | Brokerage ${cr(x.brokerage)} | Billed OS ${cr(x.billOS)} | Demand due ${cr(x.demand)}` }));
   };
+  const inactive = new Set(c.directors.filter((d) => !d.active).map((d) => d.name.split("~")[0]));
+  const isRed = (name: string) => inactive.has(name);
   const win = `from=${fromIso}&to=${toIso}`;
   const stageTotal = STAGES.reduce((s, k) => s + r.stage[k].count, 0);
   const sold = r.stage["RA Close"].count + r.stage["RA Open"].count + r.stage["RC open"].count;
@@ -90,7 +92,7 @@ export default async function ReceivablesDashboard({ searchParams }: { searchPar
         <h2 className="h2 !mb-0">Ranking by Director, Builder, Project and Branch</h2>
         <p className="text-xs text-[var(--muted)]">Bar = due receivables (PendDue, as of today); after it: collections | brokerage recd (of the period) | billed not received | 1st demand due. Click a bar to narrow the dashboard to it.</p>
         <div className="grid grid-cols-1 gap-3">
-          {(Object.keys(BY_LABEL) as By[]).map((by) => <HBarChart key={by} wide title={`${BY_LABEL[by]}s by due receivables`} rows={rankRows(by)} hrefOf={drill(by)} />)}
+          {(Object.keys(BY_LABEL) as By[]).map((by) => <HBarChart key={by} wide title={`${BY_LABEL[by]}s by due receivables`} rows={rankRows(by)} hrefOf={drill(by)} isRed={by === "director" ? isRed : undefined} note={by === "director" && inactive.size ? "Red = inactive Director." : undefined} />)}
         </div>
       </section>
       <p className="text-xs text-[var(--muted)]">
