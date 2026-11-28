@@ -16,11 +16,27 @@ export const short = (v: number) => {
   return a >= 1e7 ? `${s}${(a / 1e7).toFixed(2)}cr` : a >= 1e5 ? `${s}${(a / 1e5).toFixed(1)}L` : a >= 1e3 ? `${s}${(a / 1e3).toFixed(0)}k` : `${s}${Math.round(a)}`;
 };
 
-export function Tile({ label, value, sub, href, colour = "#2563eb" }: { label: string; value: string; sub?: string; href?: string; colour?: string }) {
+/** % change from the previous figure (null when there is nothing to compare with). */
+export const change = (now: number, before: number): number | null => (Math.abs(before) < 0.5 ? null : (now - before) / Math.abs(before));
+
+export function Tile({ label, value, sub, href, colour = "#2563eb", delta, lowerIsBetter = false, deltaLabel = "vs previous period" }: {
+  label: string; value: string; sub?: string; href?: string; colour?: string;
+  /** change against the previous period (0.18 = +18%); undefined = not shown, null = no previous figure */
+  delta?: number | null; lowerIsBetter?: boolean; deltaLabel?: string;
+}) {
+  const up = (delta ?? 0) > 0.0005, down = (delta ?? 0) < -0.0005;
+  const good = lowerIsBetter ? down : up, bad = lowerIsBetter ? up : down;
   const body = (
     <>
       <div className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-[var(--muted)]">{label}</div>
-      <div className="mt-1 text-xl font-semibold leading-tight" style={{ color: colour }}>{value}</div>
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
+        <span className="text-xl font-semibold leading-tight" style={{ color: colour }}>{value}</span>
+        {delta !== undefined && (
+          <span className={`text-[11px] font-semibold ${good ? "text-green-600" : bad ? "text-red-600" : "text-[var(--muted)]"}`} title={deltaLabel}>
+            {delta === null ? "new" : `${up ? "▲" : down ? "▼" : "■"} ${Math.abs(delta * 100).toFixed(0)}%`}
+          </span>
+        )}
+      </div>
       {sub && <div className="text-[11px] leading-snug text-[var(--muted)]">{sub}</div>}
     </>
   );
@@ -28,6 +44,60 @@ export function Tile({ label, value, sub, href, colour = "#2563eb" }: { label: s
   return href
     ? <Link href={href} style={style} className="card block !p-3 transition hover:shadow-md" title="Open the records">{body}</Link>
     : <div className="card !p-3" style={style}>{body}</div>;
+}
+
+/** A thin strip of warning chips (only the ones with something to show); each opens the records. */
+export function AlertStrip({ items }: { items: { label: string; count: number; href?: string; tone?: "red" | "amber" | "blue" }[] }) {
+  const shown = items.filter((i) => i.count > 0);
+  const TONE = { red: "border-red-200 bg-red-50 text-red-800", amber: "border-amber-200 bg-amber-50 text-amber-800", blue: "border-blue-200 bg-blue-50 text-blue-800" };
+  if (!shown.length) return <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-800">✓ Nothing needs attention: no missing slabs, data exceptions or waiting approvals.</div>;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">Needs attention</span>
+      {shown.map((i) => {
+        const cls = `rounded-full border px-3 py-1 text-xs font-medium ${TONE[i.tone ?? "amber"]}`;
+        const body = <><b>{i.count}</b> {i.label}</>;
+        return i.href ? <Link key={i.label} href={i.href} className={`${cls} hover:shadow-sm`}>{body} →</Link> : <span key={i.label} className={cls}>{body}</span>;
+      })}
+    </div>
+  );
+}
+
+/** Two or three lines over time (e.g. cash in, cash out, net), with the value written on the last point of each line. */
+export function LineChart({ title, labels, series, fmt = short, note }: { title: string; labels: string[]; series: { name: string; colour: string; values: number[]; dashed?: boolean }[]; fmt?: (v: number) => string; note?: string }) {
+  const W = 440, H = 150, padL = 20, padR = 50, padT = 12, padB = 20, n = labels.length;
+  const all = series.flatMap((s) => s.values);
+  const max = Math.max(0, ...all), min = Math.min(0, ...all), span = max - min || 1;
+  const x = (i: number) => padL + (n <= 1 ? (W - padL - padR) / 2 : (i / (n - 1)) * (W - padL - padR));
+  const y = (v: number) => padT + ((max - v) / span) * H;
+  const every = Math.max(1, Math.ceil(n / 8)); // at most ~8 month labels
+  return (
+    <div className="card">
+      <div className="flex flex-wrap items-center gap-x-4">
+        <h2 className="h2 !mb-1">{title}</h2>
+        {series.map((s) => <span key={s.name} className="mb-1 flex items-center gap-1 text-[11px] text-[var(--muted)]"><i className="inline-block h-0.5 w-3" style={{ background: s.colour }} />{s.name}</span>)}
+      </div>
+      {!n && <p className="text-sm text-[var(--muted)]">No data.</p>}
+      {n > 0 && (
+        <svg viewBox={`0 0 ${W} ${H + padT + padB}`} className="w-full" role="img" aria-label={title}>
+          <line x1={padL} y1={y(0)} x2={W - padR} y2={y(0)} stroke="currentColor" opacity={0.3} />
+          {series.map((s) => {
+            const pts = s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+            const last = s.values.length - 1;
+            return (
+              <g key={s.name}>
+                <polyline points={pts} fill="none" stroke={s.colour} strokeWidth={2.2} strokeDasharray={s.dashed ? "4 3" : undefined} strokeLinejoin="round" />
+                {s.values.map((v, i) => <circle key={i} cx={x(i)} cy={y(v)} r={2.6} fill={s.colour}><title>{`${labels[i]} - ${s.name}: ${fmt(v)}`}</title></circle>)}
+                {last >= 0 && <text x={x(last) + 5} y={y(s.values[last]) + 3.5} fontSize="10.5" fontWeight="700" fill={s.values[last] < 0 ? "#dc2626" : s.colour}>{fmt(s.values[last])}</text>}
+              </g>
+            );
+          })}
+          {labels.map((l, i) => (i % every === 0 || i === n - 1) && <text key={i} x={x(i)} y={H + padT + 15} textAnchor="middle" fontSize="10" fill="currentColor" opacity={0.65}>{l}</text>)}
+        </svg>
+      )}
+      {note && <p className="text-[11px] text-[var(--muted)]">{note}</p>}
+    </div>
+  );
 }
 
 interface Pt { label: string; v: number; href?: string; colour?: string }

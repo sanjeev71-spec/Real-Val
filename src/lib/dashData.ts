@@ -28,6 +28,7 @@ export const dashRows = () =>
       rcra: str(r["RC/RA"]), raPct: num(r["RA%"] as number), coRev: num(r.CoRev as number), coRevRA: num(r.CoRevRA as number),
       pendDue: num(r.PendDue as number), futDue: num(r.FutDue as number), billOS: num(r.BillOS as number),
       share: shareToDirector(r, "Share"), shareRA: shareToDirector(r, "SharexRA"),
+      client: str(r.Client), unit: str(r.UnitNo), noSlab: str(r.DSlab).trim() === "",
     }));
     const ex: DExp[] = exps.map((r) => ({ date: isoToSerial(r.PayDate as string) ?? 0, head: str(r.Head), mode: str(r.Mode), signed: num(r.SignedGross as number), bkgId: str(r.BkgID) }));
     return { bks, exps: ex };

@@ -7,6 +7,7 @@ export interface DBk {
   rcra: string; raPct: number; coRev: number; coRevRA: number;
   pendDue: number; futDue: number; billOS: number;
   share: number; shareRA: number; // ShareAmt of the booking's Director level (the chain up to the Director), before overrides
+  client?: string; unit?: string; noSlab?: boolean; // for the Top bookings table and the "no DSlab" alert
 }
 export interface DExp { date: number; head: string; mode: string; signed: number; bkgId: string }
 export interface Scope { director: string; builder: string; project: string }
