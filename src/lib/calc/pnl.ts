@@ -273,3 +273,37 @@ export function computeDirectorSummary(data: PnlData, directors: string[], from:
     return { director: d, revInc, share, shareRA, exp, ff: share - exp, pl: shareRA - exp };
   });
 }
+
+/**
+ * What one booking adds to each Director's P&L (the same rules as computeDirectorSummary): the booking's Director gets the revenue and
+ * the share up to their level; the Override person gets the override share; the chain top pays the override when it is not the Director.
+ * Keyed by lower-case employee code: [rev, share, shareRA]. A booking that is not Live / Not Live adds nothing.
+ */
+export function bookingParts(b: PnlBooking): Record<string, [number, number, number]> {
+  const out: Record<string, [number, number, number]> = {};
+  if (!sold(b)) return out;
+  const add = (code: string, r: number, s: number, sr: number) => {
+    if (!code) return;
+    const k = code.toLowerCase();
+    const p = out[k] ?? [0, 0, 0];
+    out[k] = [p[0] + r, p[1] + s, p[2] + sr];
+  };
+  const dc = codeOf(b.director);
+  if (dc) add(dc, b.rev, cumulativeShare(b, dc, "share"), cumulativeShare(b, dc, "shareRA"));
+  if (b.overrideEmp) add(codeOf(b.overrideEmp), 0, b.overrideShare, b.overrideShareRA);
+  const top = b.levels[4]?.emp ?? "";
+  if (top && !same(top, b.director)) add(codeOf(top), 0, -b.overrideShare, -b.overrideShareRA);
+  return out;
+}
+
+/** Paid expense of a Director over [f, t] (every P&L head, and seat cost once it is charged) - the "Paid Exp" of the P&L. */
+export function paidExpense(data: PnlData, director: string, f: number, t: number): number {
+  let exp = 0;
+  for (const h of pnlHeads(director, data.exps, f, t)) exp += expenseOf(data.exps, h, director, f, t) + (h === "Seat Cost" ? seatCostFor(director, data.seats, f, t) : 0);
+  return exp;
+}
+
+/** Paid expense of one P&L head for a Director over [f, t] (with seat cost on the Seat Cost head once it is charged). */
+export function headExpense(data: PnlData, head: string, director: string, f: number, t: number): number {
+  return expenseOf(data.exps, head, director, f, t) + (head === "Seat Cost" ? seatCostFor(director, data.seats, f, t) : 0);
+}

@@ -284,3 +284,42 @@ export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
+
+/**
+ * Last known state of every booking (what the event sync compares against). parts = per Director code:
+ * [DirectorRevenue + incentives, ShareAmt, ShareAmt x RA%] the way the Director-wise P&L counts them.
+ */
+export const bookingSnapshots = pgTable("booking_snapshots", {
+  bkgId: text("bkg_id").primaryKey(),
+  status: text("status"),
+  sold: boolean("sold").notNull(),
+  raClosed: boolean("ra_closed").notNull(),
+  director: text("director"),
+  parts: jsonb("parts").$type<Record<string, [number, number, number]>>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * What happened to a booking and when: booked, cancel, reinstate, RA close / reopen, revision, transfer, status.
+ * One row per Director whose figures moved (rev / share / shareRA are the change, + or -); marker events carry zeros.
+ * captured_on = the day the site saw the change (never edited); effective_date = the month it counts in (Master / Admin may correct it).
+ */
+export const bookingEvents = pgTable("booking_events", {
+  id: serial("id").primaryKey(),
+  grp: text("grp").notNull(), // the rows of one change share this key (a date correction moves them together)
+  bkgId: text("bkg_id").notNull(),
+  kind: text("kind").notNull(),
+  director: text("director"), // Name~Code whose figures moved
+  rev: doublePrecision("rev").notNull().default(0),
+  share: doublePrecision("share").notNull().default(0),
+  shareRA: doublePrecision("share_ra").notNull().default(0),
+  detail: text("detail"),
+  effectiveDate: date("effective_date").notNull(),
+  capturedOn: date("captured_on").notNull(),
+  capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+  dateConfirmed: boolean("date_confirmed").notNull().default(true), // false = guessed when the history was filled in: please confirm
+  source: text("source").notNull(), // site | history
+  originalEffective: date("original_effective"),
+  correctedBy: integer("corrected_by"),
+  correctedAt: timestamp("corrected_at", { withTimezone: true }),
+}, (t) => [index("bev_bkg_idx").on(t.bkgId), index("bev_eff_idx").on(t.effectiveDate), index("bev_grp_idx").on(t.grp)]);

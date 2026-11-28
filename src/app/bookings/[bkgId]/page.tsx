@@ -4,6 +4,8 @@ import { computedBookings } from "@/lib/data";
 import Link from "next/link";
 import { bkgHistory } from "@/lib/bkgHistory";
 import { BookingView } from "@/components/BookingView";
+import { EventTable } from "@/components/EventTable";
+import { eventGroups, syncBookingEventsQuietly } from "@/lib/bookingEvents";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +16,8 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
   const row = (await computedBookings()).find((r) => String(r.BkgID).toUpperCase() === decodeURIComponent(bkgId).toUpperCase());
   if (!row || (user.role === "sales" && row.Emp !== user.empCode)) notFound();
   const history = user.role === "sales" ? null : await bkgHistory(String(row.BkgID));
+  if (user.role !== "sales") await syncBookingEventsQuietly(); // pick up anything not yet recorded
+  const events = user.role === "sales" ? null : await eventGroups({ bkgId: String(row.BkgID) });
   return (
     <div className="space-y-4">
       {saved && <div className="card border-green-300 bg-green-50 text-sm">Saved - the change is logged under Exp/Emp/Bkg approvals.</div>}
@@ -24,6 +28,13 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
         {[row.BkgID, row.Client, row.Builder, row.Project, row.UnitNo].map((x) => String(x ?? "").trim()).filter(Boolean).join(" ~ ")}
       </h1>
       <BookingView row={row} />
+      {events && (
+        <section className="card overflow-x-auto">
+          <h2 className="h2">Events (month by month)</h2>
+          <p className="mb-2 text-xs text-[var(--muted)]">What happened to this booking and the month each change counts in for the monthly movement report. The captured date is when the site saw the change; the effective date can be corrected.</p>
+          <EventTable groups={events} canEdit />
+        </section>
+      )}
       {history && (
         <section className="card overflow-x-auto">
           <h2 className="h2">History of this booking</h2>

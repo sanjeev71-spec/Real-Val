@@ -345,22 +345,25 @@ import { num as numOf } from "./calc/excel";
 /** The two heavy reads every report builds on (computed bookings and computed Exp), cached for 30 s. */
 export const loadCore = () => memo("core", async () => ({ bk: await computedBookings(), exps: await expWithCalc() }));
 
+/** One computed booking in the shape the P&L reads (also used by the booking event log). */
+export const pnlBookingOf = (r: Awaited<ReturnType<typeof computedBookings>>[number]): PnlData["bookings"][number] => ({
+  status: String(r.FormStatus ?? ""),
+  month: isoToSerial(r.BkgMonth as string) ?? 0,
+  director: String(r.Director ?? ""),
+  rev: numOf(r.DirectorRevenue) + numOf(r.SpinToWin) + numOf(r.IncentivePOC) + numOf(r.IncentiveBuilder),
+  depth: numOf(r.RS_Depth),
+  levels: [0, 1, 2, 3, 4].map((k) => ({ emp: String(r[`L${k}_Emp`] ?? ""), share: numOf(r[`L${k}_Share`]), shareRA: numOf(r[`L${k}_SharexRA`]) })),
+  overrideEmp: String(r.Override_Emp ?? ""),
+  overrideShare: numOf(r.Override_Share),
+  overrideShareRA: numOf(r.Override_SharexRA),
+});
+
 /** Everything the P&L reports read: computed bookings, computed Exp, and the Emp periods (cached for 30 s - it is a heavy read). */
 async function loadPnlDataRaw(): Promise<PnlData> {
   const [{ bk, exps }, { emp }] = await Promise.all([loadCore(), loadRaw()]);
   const today = todaySerial();
   const data: PnlData = {
-    bookings: bk.map((r) => ({
-      status: String(r.FormStatus ?? ""),
-      month: isoToSerial(r.BkgMonth as string) ?? 0,
-      director: String(r.Director ?? ""),
-      rev: numOf(r.DirectorRevenue) + numOf(r.SpinToWin) + numOf(r.IncentivePOC) + numOf(r.IncentiveBuilder),
-      depth: numOf(r.RS_Depth),
-      levels: [0, 1, 2, 3, 4].map((k) => ({ emp: String(r[`L${k}_Emp`] ?? ""), share: numOf(r[`L${k}_Share`]), shareRA: numOf(r[`L${k}_SharexRA`]) })),
-      overrideEmp: String(r.Override_Emp ?? ""),
-      overrideShare: numOf(r.Override_Share),
-      overrideShareRA: numOf(r.Override_SharexRA),
-    })),
+    bookings: bk.map(pnlBookingOf),
     exps: exps.map((r) => ({
       head: String(r.Head ?? ""), expType: String(r.ExpType ?? ""), director: String(r.Director ?? ""),
       date: isoToSerial(r.ValueDate as string) ?? 0,

@@ -2,11 +2,15 @@
 import { canUploadEmp } from "@/lib/company";
 import { revalidatePath as revalidate } from "next/cache";
 import { bumpData } from "@/lib/cache";
+import { after } from "next/server";
+import { setEventDate, syncBookingEventsQuietly } from "@/lib/bookingEvents";
 
-// every save refreshes the cached calculations as well as the pages
+// every save refreshes the cached calculations as well as the pages, and (after the response) records what changed on the
+// bookings in the booking event log - any save can move a booking's figures (a booking, a price list, an Emp change ...)
 const revalidatePath: typeof revalidate = (path, type) => {
   bumpData();
   revalidate(path, type);
+  try { after(() => syncBookingEventsQuietly()); } catch { void syncBookingEventsQuietly(); }
 };
 import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
@@ -537,4 +541,14 @@ export async function allUploadCommitAction(form: FormData): Promise<AllCommitRe
   } catch (e) {
     return { ok: false, message: (e as Error).message, done };
   }
+}
+
+// ---- booking event log: Master / Admin set the month a change counts in (captured date never changes)
+export async function setEventDateAction(form: FormData): Promise<void> {
+  const user = await requireUser(["master", "admin"]);
+  const grp = String(form.get("grp") ?? "");
+  const date = String(form.get("date") ?? "");
+  if (!grp || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+  await setEventDate(grp, date, user.id);
+  revalidate("/", "layout");
 }
