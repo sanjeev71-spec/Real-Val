@@ -1,7 +1,8 @@
 import { currentUser } from "@/lib/auth";
 import { computedBookings, employeesWithCalc, expWithCalc } from "@/lib/data";
 import { expExceptionRemarks, storedExpFields } from "@/lib/expRemarks";
-import { XLSX_TYPE, combinedWorkbook, stampDate } from "@/lib/excelExport";
+import { XLSX_TYPE, combinedWorkbook, dataFileName } from "@/lib/excelExport";
+import { eventDatesByBooking, syncBookingEventsQuietly } from "@/lib/bookingEvents";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -15,10 +16,11 @@ export async function GET(req: Request) {
   const from = (k: string) => (/^\d{4}-\d{2}-\d{2}$/.test(sp.get(k) ?? "") ? sp.get(k)! : "");
   const bkgFrom = from("bf"), expFrom = from("ef"), expTo = from("et");
   const [bkgRows, expAll, emps] = await Promise.all([computedBookings(), expWithCalc(), employeesWithCalc()]);
-  const [remarks, stored] = await Promise.all([expExceptionRemarks(expAll), storedExpFields()]);
+  await syncBookingEventsQuietly(); // the dates below include anything saved but not yet recorded
+  const [remarks, stored, eventDates] = await Promise.all([expExceptionRemarks(expAll), storedExpFields(), eventDatesByBooking()]);
   const bkg = bkgFrom ? bkgRows.filter((r) => String(r.BkgMonth ?? "") >= bkgFrom) : bkgRows;
   const exp = expAll.filter((r) => (!expFrom || String(r.PayDate ?? "") >= expFrom) && (!expTo || String(r.PayDate ?? "") <= expTo));
-  const file = await combinedWorkbook({ bkg, exp, emp: emps, remarks, stored });
+  const file = await combinedWorkbook({ bkg, exp, emp: emps, remarks, stored, eventDates });
   // sent in pieces: a streamed response is not held to the 4.5 MB body limit of a plain function response
   const CHUNK = 64 * 1024;
   let at = 0;
@@ -30,6 +32,6 @@ export async function GET(req: Request) {
     },
   });
   return new Response(body, {
-    headers: { "Content-Type": XLSX_TYPE, "Content-Disposition": `attachment; filename="Bkg-Exp-Emp-${stampDate()}.xlsx"` },
+    headers: { "Content-Type": XLSX_TYPE, "Content-Disposition": `attachment; filename="${dataFileName()}.xlsx"` },
   });
 }

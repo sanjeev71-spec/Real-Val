@@ -160,6 +160,7 @@ export async function saveUserAction(input: { id?: number; email: string; name: 
 // ---- Exp / Emp change requests
 import * as ch from "@/lib/changes";
 import { adaptCombinedEmp, checkEmpUpload, prepareEmpUpload, type EmpUploadRow } from "@/lib/empUpload";
+import { applyEventDates, checkEventDates, splitEventDates } from "@/lib/eventDateUpload";
 
 export async function expRequestAction(action: "create" | "update" | "delete", data: Record<string, unknown>, targetId?: number) {
   const user = await requireUser(["admin", "master"]);
@@ -485,8 +486,18 @@ export async function allUploadCheckAction(form: FormData): Promise<AllCheckResu
     if (!file.bkg) sheets.push(empty("Bkg"));
     else if (!fl.Bkg) sheets.push({ ...empty("Bkg"), present: true, summary: `${file.bkg.length} row(s) - left out` });
     else {
-      const r = await checkBkgUpload(file.bkg, { allowAdd: fl.allowAdd, allowUpdate: fl.allowUpdate });
-      sheets.push({ sheet: "Bkg", present: true, included: true, todo: r.counts.added + r.counts.changed, summary: `${r.counts.added} new · ${r.counts.changed} changed · ${r.counts.unchanged} unchanged`, ...errList(r.rows), warnings: r.warnings });
+      // CancelDate / RACloseDate are event dates, not booking fields: checked on their own
+      const ed = splitEventDates(file.bkg);
+      const r = await checkBkgUpload(ed.rows, { allowAdd: fl.allowAdd, allowUpdate: fl.allowUpdate });
+      const dc = await checkEventDates(ed.items);
+      const el = errList(r.rows);
+      const dateErrors = [...ed.errors, ...dc.errors];
+      const dates = dc.changes + dc.pending;
+      sheets.push({
+        sheet: "Bkg", present: true, included: true, todo: r.counts.added + r.counts.changed + dates,
+        summary: `${r.counts.added} new · ${r.counts.changed} changed · ${r.counts.unchanged} unchanged${dates ? ` · ${dates} cancel / RA close date(s) to set` : ""}`,
+        badRows: el.badRows + dateErrors.length, errors: [...el.errors, ...dateErrors].slice(0, 25), warnings: [...r.warnings, ...dc.warnings],
+      });
     }
     if (!file.exp) sheets.push(empty("Exp"));
     else if (!fl.Exp) sheets.push({ ...empty("Exp"), present: true, summary: `${file.exp.length} row(s) - left out` });
@@ -519,13 +530,18 @@ export async function allUploadCommitAction(form: FormData): Promise<AllCommitRe
       }
     }
     if (fl.Bkg && file.bkg) {
-      const res = await checkBkgUpload(file.bkg, { allowAdd: fl.allowAdd, allowUpdate: fl.allowUpdate });
+      const ed = splitEventDates(file.bkg);
+      const res = await checkBkgUpload(ed.rows, { allowAdd: fl.allowAdd, allowUpdate: fl.allowUpdate });
       if (res.rows.some((r) => Object.keys(r.errors).length)) return fail("Bkg", "some rows have errors - check again");
+      if (ed.errors.length || (await checkEventDates(ed.items)).errors.length) return fail("Bkg", "some CancelDate / RACloseDate cells have errors - check again");
       if (res.counts.added + res.counts.changed) {
         const r = await ch.requestBkgUpload(user, { fileName: file.name, creates: res.creates, updates: res.updates });
         if (!r.ok) return fail("Bkg", r.message ?? "could not save");
         done.push({ sheet: "Bkg", applied: r.applied ?? false, id: r.id, summary: `${res.counts.added} new, ${res.counts.changed} changed` });
       }
+      // then the dates (after the bookings are saved, so a cancellation in this same file has its event)
+      const dr = await applyEventDates(ed.items, user.id);
+      if (dr.set || dr.ignored.length) done.push({ sheet: "Bkg dates", applied: true, summary: `${dr.set} cancel / RA close date(s) set${dr.ignored.length ? `; ignored (nothing recorded): ${dr.ignored.join(", ")}` : ""}` });
     }
     if (fl.Exp && file.exp) {
       const res = await checkExpUpload(file.exp, { allowAdd: fl.allowAdd, allowUpdate: fl.allowUpdate });

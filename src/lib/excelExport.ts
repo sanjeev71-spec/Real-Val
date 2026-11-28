@@ -4,33 +4,46 @@ import { BKG_COLUMNS, BKG_INPUT_KEYS, DATE_KEYS, colName } from "@/lib/fields";
 import { CALC_CELL_COLOUR, CALC_COLOUR, EXP_DOWNLOAD_COLUMNS, EXP_GROUP_COL, EXP_REMARK_COL, FILL_COLOUR, REMARK_COLOUR, colNote, kindOfCol } from "@/lib/expLayout";
 import { sortBkgByDate } from "@/lib/bkgFilter";
 import type { employeesWithCalc } from "@/lib/data";
-import { SEAT_CHARGED } from "@/lib/company";
+import { COMPANY, SEAT_CHARGED } from "@/lib/company";
 
 // One place that builds the Bkg and Exp workbooks, so the Bkg, Exp and Data exceptions downloads always have the same format.
 type Row = Record<string, unknown>;
 
 /** Written in Bkg Date order with the latest booking at the bottom (the list on screen shows the latest on top). */
-export async function bkgWorkbook(rowsAny: Row[], into?: ExcelJS.Workbook): Promise<ArrayBuffer> {
+/**
+ * eventDates (the RealV / TRPL Data file): CancelDate and RACloseDate are added after FormStatus - the month the cancellation / RA close
+ * counts in (from the booking event log). Green: a changed date is read on upload and moves that event.
+ */
+export async function bkgWorkbook(rowsAny: Row[], into?: ExcelJS.Workbook, eventDates?: Map<string, { cancel?: { date: string }; raClose?: { date: string } }>): Promise<ArrayBuffer> {
   const rows = sortBkgByDate(rowsAny, "asc");
   const wb = into ?? new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Bkg");
-  ws.columns = BKG_COLUMNS.map((c) => ({ header: colName(c), key: c, width: Math.max(10, c.length + 2), style: DATE_KEYS.has(c) ? { numFmt: "dd-mm-yyyy" } : {} }));
+  const EXTRA = ["CancelDate", "RACloseDate"];
+  const cols = eventDates ? BKG_COLUMNS.flatMap((c) => (c === "FormStatus" ? [c, ...EXTRA] : [c])) : BKG_COLUMNS;
+  const isDate = (c: string) => DATE_KEYS.has(c) || EXTRA.includes(c);
+  ws.columns = cols.map((c) => ({ header: EXTRA.includes(c) ? c : colName(c), key: c, width: Math.max(10, c.length + 2), style: isDate(c) ? { numFmt: "dd-mm-yyyy" } : {} }));
+  const asDate = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00Z`) : v ?? null);
   for (const r of rows) {
-    ws.addRow(Object.fromEntries(BKG_COLUMNS.map((c) => {
+    const ev = eventDates?.get(String(r.BkgID ?? "").trim().toUpperCase());
+    ws.addRow(Object.fromEntries(cols.map((c) => {
+      if (c === "CancelDate") return [c, asDate(ev?.cancel?.date)];
+      if (c === "RACloseDate") return [c, asDate(ev?.raClose?.date)];
       const v = r[c];
-      if (DATE_KEYS.has(c) && typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) return [c, new Date(`${v}T00:00:00Z`)];
-      return [c, v ?? null];
+      return [c, DATE_KEYS.has(c) ? asDate(v) : v ?? null];
     })));
   }
   // Headings: light green = typed by hand (read by the Bkg upload), light grey = derived (calculated, ignored on upload)
-  const typed = new Set(BKG_INPUT_KEYS);
+  const typed = new Set([...BKG_INPUT_KEYS, ...EXTRA]);
   const hdr = ws.getRow(1);
   hdr.font = { bold: true };
-  BKG_COLUMNS.forEach((c, i) => {
-    hdr.getCell(i + 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: typed.has(c) ? FILL_COLOUR : CALC_COLOUR } };
+  cols.forEach((c, i) => {
+    const cell = hdr.getCell(i + 1);
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: typed.has(c) ? FILL_COLOUR : CALC_COLOUR } };
+    if (c === "CancelDate") cell.note = "The month the cancellation counts in (Monthly movement). Filled by the site when FormStatus becomes Cancel; type another date to move it. Blank = no change.";
+    if (c === "RACloseDate") cell.note = "The month the RA close counts in (Monthly movement). Filled by the site when RA% moves above 0; type another date to move it. Blank = no change.";
   });
   ws.views = [{ state: "frozen", ySplit: 1 }];
-  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: BKG_COLUMNS.length } };
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
   if (into) return new ArrayBuffer(0);
 
   const help = wb.addWorksheet("Legend");
@@ -149,13 +162,15 @@ export async function empWorkbook(rows: Awaited<ReturnType<typeof employeesWithC
 }
 
 /** One file with the three tables as sheets Bkg, Exp and Emp (each keeps its own heading colours; no Legend sheets). */
-export async function combinedWorkbook(parts: { bkg: Row[]; exp: Row[]; emp: Awaited<ReturnType<typeof employeesWithCalc>>; remarks: Map<number, string>; stored?: Map<number, { emp: string | null; project: string | null }> }): Promise<Uint8Array> {
+export async function combinedWorkbook(parts: { bkg: Row[]; exp: Row[]; emp: Awaited<ReturnType<typeof employeesWithCalc>>; remarks: Map<number, string>; stored?: Map<number, { emp: string | null; project: string | null }>; eventDates?: Map<string, { cancel?: { date: string }; raClose?: { date: string } }> }): Promise<Uint8Array> {
   const out = new ExcelJS.Workbook();
-  await bkgWorkbook(parts.bkg, out);
+  await bkgWorkbook(parts.bkg, out, parts.eventDates);
   await expWorkbook(parts.exp, parts.remarks, parts.stored, out);
   await empWorkbook(parts.emp, out);
   return new Uint8Array((await out.xlsx.writeBuffer()) as ArrayBuffer);
 }
 
 export const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-export const stampDate = () => new Date().toISOString().slice(0, 10);
+export const stampDate = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10); // India date
+/** "RealV Data 2026-11-28" / "TRPL Data 2026-11-28": the name of the Bkg + Exp + Emp file. */
+export const dataFileName = () => `${COMPANY.key === "trpl" ? "TRPL" : "RealV"} Data ${stampDate()}`;

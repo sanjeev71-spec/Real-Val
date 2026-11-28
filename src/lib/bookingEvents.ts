@@ -81,7 +81,7 @@ async function historyDates(): Promise<{ cancel: Map<string, string>; rcra: Map<
  * that finds nothing new writes nothing). The very first run fills in the history: every booking is "booked" in its booking month,
  * and old cancellations / RA closes get the date found in the change log, or the booking date marked "please confirm".
  */
-export async function syncBookingEvents(): Promise<{ events: number; history: boolean }> {
+export async function syncBookingEvents(): Promise<{ events: number; history: boolean; skipped?: boolean }> {
   const { states, names } = await currentStates();
   const db = await getDb();
   const today = todayIso();
@@ -92,7 +92,7 @@ export async function syncBookingEvents(): Promise<{ events: number; history: bo
   return db.transaction(async (tx) => {
     // another sync is running: leave it to that one (whatever it misses, the next save or page visit picks up) - never wait
     const lr = (await tx.execute(sql`select pg_try_advisory_xact_lock(${LOCK}) as ok`)) as unknown as { rows?: { ok: boolean }[] } | { ok: boolean }[];
-    if (!((("rows" in lr ? lr.rows : lr) as { ok: boolean }[])[0]?.ok)) return { events: 0, history: false };
+    if (!((("rows" in lr ? lr.rows : lr) as { ok: boolean }[])[0]?.ok)) return { events: 0, history: false, skipped: true };
     const prevRows = await tx.select().from(s.bookingSnapshots);
     const prev = new Map(prevRows.map((p) => [p.bkgId.toUpperCase(), p]));
     const [{ n }] = (await tx.select({ n: sql<number>`count(*)::int` }).from(s.bookingEvents)) as { n: number }[];
@@ -225,4 +225,24 @@ export async function setEventDate(grp: string, effective: string, userId: numbe
   await db.update(s.bookingEvents)
     .set({ effectiveDate: effective, dateConfirmed: true, correctedBy: userId, correctedAt: new Date(), originalEffective: sql`coalesce(${s.bookingEvents.originalEffective}, ${s.bookingEvents.effectiveDate})` })
     .where(sql`${s.bookingEvents.grp} = ${grp}`);
+}
+
+export interface EventDate { date: string; grp: string }
+/** The cancellation still in force (no reinstate after it) and the RA close still in force (no re-open after it) of each booking. */
+export async function eventDatesByBooking(): Promise<Map<string, { cancel?: EventDate; raClose?: EventDate }>> {
+  const db = await getDb();
+  const rows = await db.select({ id: s.bookingEvents.id, grp: s.bookingEvents.grp, bkgId: s.bookingEvents.bkgId, kind: s.bookingEvents.kind, date: s.bookingEvents.effectiveDate })
+    .from(s.bookingEvents).where(inArray(s.bookingEvents.kind, ["cancel", "reinstate", "deleted", "ra_close", "ra_reopen"]));
+  rows.sort((a, b) => a.id - b.id);
+  const out = new Map<string, { cancel?: EventDate; raClose?: EventDate }>();
+  for (const r of rows) {
+    const k = r.bkgId.toUpperCase();
+    const o = out.get(k) ?? {};
+    if (r.kind === "cancel" || r.kind === "deleted") o.cancel = { date: r.date, grp: r.grp };
+    if (r.kind === "reinstate") delete o.cancel;
+    if (r.kind === "ra_close") o.raClose = { date: r.date, grp: r.grp };
+    if (r.kind === "ra_reopen") delete o.raClose;
+    out.set(k, o);
+  }
+  return out;
 }
